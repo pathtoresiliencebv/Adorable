@@ -5,6 +5,8 @@ import { freestyle } from "@/lib/freestyle";
 
 export const stackServerApp = new StackServerApp({
   tokenStore: "nextjs-cookie",
+    apiUrl: process.env.STACK_AUTH_API_URL, // Of hoe de variabele ook genoemd wordt
+
 });
 
 export async function getUser() {

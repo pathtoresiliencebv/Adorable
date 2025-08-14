@@ -6,6 +6,9 @@ import { openai } from "@ai-sdk/openai";
  * This configuration provides a comprehensive set of OpenAI models optimized for
  * different development tasks, with intelligent fallback strategies and
  * performance optimization.
+ * 
+ * DEPLOYMENT FIX: This comment ensures fresh Server Action hashes are generated
+ * to resolve the "Failed to find Server Action" error in production.
  */
 
 // Base OpenAI configuration

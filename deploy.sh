@@ -8,23 +8,23 @@ cp .env .next/standalone/.env
 
 cd .next/standalone
 npx freestyle deploy --web server.js --domain qreatify.dev --timeout 360
-import { FreestyleSandboxes } from "freestyle-sandboxes";
+# import { FreestyleSandboxes } from "freestyle-sandboxes";
 
-const api = new FreestyleSandboxes({
-  apiKey: process.env.FREESTYLE_API_KEY!, // make sure to set this
-});
+# const api = new FreestyleSandboxes({
+#   apiKey: process.env.FREESTYLE_API_KEY!, // make sure to set this
+# });
 
-api
-  .deployWeb(
-    {
-      kind: "git",
-      url: "https://github.com/freestyle-sh/freestyle-base-nextjs-shadcn", // URL of the repository you want to deploy
-    },
-    {
-      domains: ["qreatify.dev"],
-      build: true, // automatically detects the framework and builds the code
-    }
-  )
-  .then((result) => {
-    console.log("Deployed website @ ", result.domains);
-  });
+# api
+#   .deployWeb(
+#     {
+#       kind: "git",
+#       url: "https://github.com/freestyle-sh/freestyle-base-nextjs-shadcn", // URL of the repository you want to deploy
+#     },
+#     {
+#       domains: ["qreatify.dev"],
+#       build: true, // automatically detects the framework and builds the code
+#     }
+#   )
+#   .then((result) => {
+#     console.log("Deployed website @ ", result.domains);
+#   });

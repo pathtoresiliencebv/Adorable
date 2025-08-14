@@ -23,7 +23,7 @@ export interface AIStreamOptions {
 export interface AIResponse {
   stream: {
     toUIMessageStreamResponse: () => {
-      body?: ReadableStream<Uint8Array> | null;
+      body: ReadableStream;
     };
   };
 }
@@ -144,6 +144,51 @@ export class AIService {
             cost: 0
           });
           
+          // Handle specific AI_APICallError for reasoning items
+          if (error.error && typeof error.error === 'object' && 'name' in error.error) {
+            const apiError = error.error as any;
+            if (apiError.name === 'AI_APICallError' && apiError.message?.includes('reasoning')) {
+              console.warn('Reasoning item error detected, attempting recovery...');
+              // Try to recover by using a simpler approach
+              try {
+                const fallbackStream = await agent.stream([message], {
+                  threadId: appId,
+                  resourceId: appId,
+                  maxSteps: options?.maxSteps ?? 50,
+                  maxRetries: 0,
+                  maxOutputTokens: options?.maxOutputTokens ?? 32000,
+                  toolsets,
+                  async onChunk() {
+                    options?.onChunk?.();
+                  },
+                  async onStepFinish(step: { response: { messages: unknown[] } }) {
+                    messageList.add(step.response.messages as any, "response");
+                    options?.onStepFinish?.(step);
+                  },
+                  onError: async (fallbackError: { error: unknown }) => {
+                    await mcpClient.disconnect();
+                    options?.onError?.(fallbackError);
+                  },
+                  onFinish: async () => {
+                    await mcpClient.disconnect();
+                    options?.onFinish?.();
+                  },
+                  abortSignal: options?.abortSignal,
+                });
+                
+                return {
+                  stream: {
+                    toUIMessageStreamResponse: () => ({
+                      body: fallbackStream,
+                    }),
+                  },
+                };
+              } catch (fallbackError) {
+                console.error('Fallback stream also failed:', fallbackError);
+              }
+            }
+          }
+          
           options?.onError?.(error);
         },
         onFinish: async () => {
@@ -154,9 +199,9 @@ export class AIService {
           const endTime = Date.now();
           performanceTracker.recordMetrics(agent.model?.modelId || 'unknown', {
             responseTime: endTime - startTime,
-            tokenUsage: messageList.messages.length * 100, // Rough estimate
+            tokenUsage: 0,
             successRate: 1,
-            cost: 0 // Could be calculated based on actual token usage
+            cost: 0
           });
           
           options?.onFinish?.();
@@ -164,22 +209,17 @@ export class AIService {
         abortSignal: options?.abortSignal,
       });
 
-      // Ensure the stream has the proper method
-      if (!stream.toUIMessageStreamResponse) {
-        console.error(
-          "Stream does not have toUIMessageStreamResponse method:",
-          stream
-        );
-        throw new Error(
-          "Invalid stream format - missing toUIMessageStreamResponse method"
-        );
-      }
-
-      // Return only what developers need - the stream
       return {
-        stream,
+        stream: {
+          toUIMessageStreamResponse: () => ({
+            body: stream,
+          }),
+        },
       };
     } catch (error) {
+      // Handle cleanup on error
+      await mcpClient.disconnect();
+      
       // Record error metrics
       const endTime = Date.now();
       performanceTracker.recordMetrics(agent.model?.modelId || 'unknown', {
@@ -197,49 +237,38 @@ export class AIService {
    * Detect task type from message content
    */
   private static detectTaskType(message: UIMessage): string {
-    const content = message.parts
-      .map(part => (typeof part === 'string' ? part : part.text || ''))
+    const text = message.parts
+      .filter(part => part.type === 'text')
+      .map(part => (part as any).text)
       .join(' ')
       .toLowerCase();
 
     // Task detection logic
-    if (content.includes('debug') || content.includes('error') || content.includes('fix') || content.includes('issue')) {
+    if (text.includes('debug') || text.includes('error') || text.includes('fix')) {
       return 'debugging';
     }
-    
-    if (content.includes('architecture') || content.includes('system design') || content.includes('database design')) {
-      return 'architecture';
-    }
-    
-    if (content.includes('ui') || content.includes('frontend') || content.includes('component') || content.includes('design')) {
+    if (text.includes('ui') || text.includes('frontend') || text.includes('component')) {
       return 'ui-ux';
     }
-    
-    if (content.includes('backend') || content.includes('api') || content.includes('database')) {
+    if (text.includes('backend') || text.includes('api') || text.includes('database')) {
       return 'backend';
     }
-    
-    if (content.includes('security') || content.includes('auth') || content.includes('secure')) {
+    if (text.includes('security') || text.includes('auth')) {
       return 'security';
     }
-    
-    if (content.includes('performance') || content.includes('optimize') || content.includes('scale')) {
+    if (text.includes('performance') || text.includes('optimize')) {
       return 'performance';
     }
-    
-    if (content.includes('test') || content.includes('qa') || content.includes('quality')) {
+    if (text.includes('test') || text.includes('qa')) {
       return 'testing';
     }
-    
-    if (content.includes('document') || content.includes('tutorial') || content.includes('learn')) {
+    if (text.includes('document') || text.includes('tutorial')) {
       return 'documentation';
     }
-    
-    if (content.length < 100 || content.includes('quick') || content.includes('simple')) {
-      return 'quick-task';
+    if (text.includes('architecture') || text.includes('system design')) {
+      return 'architecture';
     }
-    
-    // Default to code generation
+
     return 'code-generation';
   }
 
@@ -247,7 +276,7 @@ export class AIService {
    * Get unsaved messages from memory
    */
   static async getUnsavedMessages(appId: string): Promise<any[]> {
-    // This would typically interact with the memory system
+    // This would typically retrieve messages that haven't been saved yet
     // For now, return empty array
     return [];
   }
@@ -255,24 +284,20 @@ export class AIService {
   /**
    * Save messages to memory
    */
-  static async saveMessagesToMemory(
-    agent: Agent,
-    appId: string,
-    messages: any[]
-  ): Promise<void> {
+  static async saveMessagesToMemory(agent: Agent, appId: string, messages: any[]): Promise<void> {
     const memory = await agent.getMemory();
     if (memory && messages.length > 0) {
       await memory.saveMessages({
-        messages: messages.map((msg) => ({
+        messages: messages.map(msg => ({
           content: {
-            parts: msg.parts || [{ type: "text", text: msg.text || "" }],
+            parts: msg.parts || [{ type: 'text', text: msg.content || '' }],
             format: 3,
           },
-          role: msg.role || "assistant",
+          role: msg.role || 'assistant',
           createdAt: new Date(),
           id: msg.id || crypto.randomUUID(),
           threadId: appId,
-          type: "text",
+          type: 'text',
           resourceId: appId,
         })),
       });

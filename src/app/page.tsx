@@ -34,12 +34,13 @@ export default function Home() {
       <main className="min-h-screen p-4 relative">
         <div className="flex w-full justify-between items-center">
           <h1 className="text-lg font-bold flex-1 sm:w-80">
-            <a href="https://www.freestyle.sh">freestyle.sh</a>
+            <a href="https://www.qreatify.io">qreatify.io</a>
+
           </h1>
           <Image
             className="dark:invert mx-2"
             src={LogoSvg}
-            alt="Adorable Logo"
+            alt="Qreatify"
             width={36}
             height={36}
           />

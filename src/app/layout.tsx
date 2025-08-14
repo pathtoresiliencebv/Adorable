@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Adorable",
-  description: "Open Source AI App Builder",
+  title: "Qreatify",
+  description: " AI App Builder",
   manifest: "/manifest.json",
   // viewport: {
   //   width: "device-width",

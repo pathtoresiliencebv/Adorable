@@ -26,7 +26,10 @@ export const memory = new Memory({
 // ChatGPT-optimized builder agent
 export const builderAgent = new Agent({
   name: "BuilderAgent",
-  model: openai("gpt-4o"),
+  model: openai("gpt-4o", {
+    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: "https://api.openai.com/v1",
+  }),
   instructions: SYSTEM_MESSAGE,
   memory,
   tools: {
@@ -39,7 +42,10 @@ export const createBuilderAgent = () => {
   try {
     return new Agent({
       name: "BuilderAgent",
-      model: openai("gpt-4o"),
+      model: openai("gpt-4o", {
+        apiKey: process.env.OPENAI_API_KEY,
+        baseURL: "https://api.openai.com/v1",
+      }),
       instructions: SYSTEM_MESSAGE,
       memory,
       tools: {

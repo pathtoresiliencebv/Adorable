@@ -4,6 +4,7 @@ import { Agent } from "@mastra/core/agent";
 import { MessageList } from "@mastra/core/agent";
 import { builderAgent } from "@/mastra/agents/builder";
 import { morphTool } from "@/tools/morph-tool";
+import { fastApplyTool, batchEditTool, morphMetricsTool } from "@/tools/morph-fast-apply";
 import { FreestyleDevServerFilesystem } from "freestyle-sandboxes";
 
 export interface AIStreamOptions {
@@ -114,6 +115,9 @@ export class AIService {
           ? {
               morph: {
                 edit_file: morphTool(fs),
+                fast_edit_file: fastApplyTool(fs),
+                batch_edit_files: batchEditTool(fs),
+                get_morph_metrics: morphMetricsTool(),
               },
             }
           : {}),

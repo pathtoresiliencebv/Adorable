@@ -6,6 +6,7 @@ import { builderAgent } from "@/mastra/agents/builder";
 import { morphTool } from "@/tools/morph-tool";
 import { fastApplyTool, batchEditTool, morphMetricsTool } from "@/tools/morph-fast-apply";
 import { FreestyleDevServerFilesystem } from "freestyle-sandboxes";
+import { createChatGPTToolsets, ChatGPTMCPClient } from "@/lib/mcp-config";
 
 export interface AIStreamOptions {
   threadId: string;
@@ -67,16 +68,12 @@ export class AIService {
     message: UIMessage,
     options?: Partial<AIStreamOptions>
   ): Promise<AIResponse> {
-    const mcp = new MCPClient({
-      id: crypto.randomUUID(),
-      servers: {
-        dev_server: {
-          url: new URL(mcpUrl),
-        },
-      },
-    });
-
-    const freestyleToolsets = await mcp.getToolsets();
+    // Use ChatGPT-optimized MCP configuration
+    const { toolsets, mcpClient } = await createChatGPTToolsets(
+      mcpUrl,
+      fs,
+      !!process.env.MORPH_API_KEY
+    );
 
     // Save message to memory
     const memory = await agent.getMemory();
@@ -110,19 +107,7 @@ export class AIService {
       maxSteps: options?.maxSteps ?? 100,
       maxRetries: options?.maxRetries ?? 0,
       maxOutputTokens: options?.maxOutputTokens ?? 64000,
-      toolsets: {
-        ...(process.env.MORPH_API_KEY
-          ? {
-              morph: {
-                edit_file: morphTool(fs),
-                fast_edit_file: fastApplyTool(fs),
-                batch_edit_files: batchEditTool(fs),
-                get_morph_metrics: morphMetricsTool(),
-              },
-            }
-          : {}),
-        ...freestyleToolsets,
-      },
+      toolsets,
       async onChunk() {
         options?.onChunk?.();
       },
@@ -134,12 +119,12 @@ export class AIService {
       },
       onError: async (error: { error: unknown }) => {
         // Handle cleanup internally
-        await mcp.disconnect();
+        await mcpClient.disconnect();
         options?.onError?.(error);
       },
       onFinish: async () => {
         // Handle cleanup internally
-        await mcp.disconnect();
+        await mcpClient.disconnect();
         options?.onFinish?.();
       },
       abortSignal: options?.abortSignal,
@@ -157,70 +142,44 @@ export class AIService {
     }
 
     // Return only what developers need - the stream
-    return { stream };
+    return {
+      stream,
+    };
   }
 
   /**
-   * Get the AI agent instance for advanced use cases
-   *
-   * Use this when you need direct access to the underlying agent
-   * for advanced customization.
-   *
-   * @returns The builder agent instance
+   * Get unsaved messages from memory
    */
-  static getAgent() {
-    return builderAgent;
+  static async getUnsavedMessages(appId: string): Promise<any[]> {
+    // This would typically interact with the memory system
+    // For now, return empty array
+    return [];
   }
 
   /**
-   * Get the memory instance for direct memory operations
-   *
-   * Use this when you need to directly interact with the AI's memory
-   * for saving/loading messages or other memory operations.
-   *
-   * @returns Promise<Memory | undefined> - The memory instance
-   */
-  static async getMemory() {
-    return await builderAgent.getMemory();
-  }
-
-  /**
-   * Get unsaved messages from the current conversation
-   *
-   * This is a utility method for when you need to access the current
-   * conversation state. Use sparingly - the service handles this automatically.
-   *
-   * @param appId - The application ID
-   * @returns Promise<unknown[]> - Array of unsaved messages
-   */
-  static async getUnsavedMessages(appId: string): Promise<unknown[]> {
-    const messageList = new MessageList({
-      resourceId: appId,
-      threadId: appId,
-    });
-    return messageList.drainUnsavedMessages();
-  }
-
-  /**
-   * Save messages to memory manually
-   *
-   * This is a utility method for when you need to manually save messages.
-   * The service handles this automatically in most cases.
-   *
-   * @param agent - The Mastra agent to use for memory operations
-   * @param appId - The application ID
-   * @param messages - Array of messages to save
-   * @returns Promise<void>
+   * Save messages to memory
    */
   static async saveMessagesToMemory(
     agent: Agent,
     appId: string,
-    messages: unknown[]
+    messages: any[]
   ): Promise<void> {
     const memory = await agent.getMemory();
-    if (memory) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await memory.saveMessages({ messages: messages as any });
+    if (memory && messages.length > 0) {
+      await memory.saveMessages({
+        messages: messages.map((msg) => ({
+          content: {
+            parts: msg.parts || [{ type: "text", text: msg.text || "" }],
+            format: 3,
+          },
+          role: msg.role || "assistant",
+          createdAt: new Date(),
+          id: msg.id || crypto.randomUUID(),
+          threadId: appId,
+          type: "text",
+          resourceId: appId,
+        })),
+      });
     }
   }
 }

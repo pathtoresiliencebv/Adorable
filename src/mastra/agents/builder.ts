@@ -5,10 +5,11 @@ import { Memory } from "@mastra/memory";
 import { PostgresStore, PgVector } from "@mastra/pg";
 import { todoTool } from "@/tools/todo-tool";
 
+// Enhanced memory configuration for ChatGPT
 export const memory = new Memory({
   options: {
     lastMessages: 1000,
-    semanticRecall: false,
+    semanticRecall: false, // Disabled until embedder is configured
     threads: {
       generateTitle: true,
     },
@@ -22,6 +23,7 @@ export const memory = new Memory({
   processors: [],
 });
 
+// ChatGPT-optimized builder agent
 export const builderAgent = new Agent({
   name: "BuilderAgent",
   model: openai("gpt-4o"),
@@ -31,3 +33,31 @@ export const builderAgent = new Agent({
     update_todo_list: todoTool,
   },
 });
+
+// Enhanced agent with error handling
+export const createBuilderAgent = () => {
+  try {
+    return new Agent({
+      name: "BuilderAgent",
+      model: openai("gpt-4o"),
+      instructions: SYSTEM_MESSAGE,
+      memory,
+      tools: {
+        update_todo_list: todoTool,
+      },
+    });
+  } catch (error) {
+    console.error("Error creating builder agent:", error);
+    throw new Error("Failed to create builder agent. Check your OpenAI API key and configuration.");
+  }
+};
+
+// Export a function to get the agent with proper error handling
+export const getBuilderAgent = () => {
+  try {
+    return builderAgent;
+  } catch (error) {
+    console.error("Error getting builder agent:", error);
+    return createBuilderAgent();
+  }
+};

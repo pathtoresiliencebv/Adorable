@@ -25,7 +25,7 @@ const response = await sendMessageWithStreaming(
 
 ```typescript
 import { Agent } from "@mastra/core/agent";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { Memory } from "@mastra/memory";
 import { PostgresStore, PgVector } from "@mastra/pg";
 import { sendMessageWithStreaming } from "@/lib";
@@ -33,7 +33,7 @@ import { sendMessageWithStreaming } from "@/lib";
 // Create your custom agent
 const myCustomAgent = new Agent({
   name: "MyCustomAgent",
-  model: anthropic("claude-3-5-sonnet-20241022"),
+  model: openai("gpt-4o"),
   instructions: "Your custom instructions here",
   memory: new Memory({
     options: { lastMessages: 1000 },
@@ -66,15 +66,55 @@ const response = await sendMessageWithStreaming(
 
 - **`getStreamState`** - Check current stream status
 - **`isStreamRunning`** - Check if stream is active
-- **`stopStream`** - Stop a running stream
-- **`waitForStreamToStop`** - Wait for stream to finish
+- **`stopStream`** - Stop an active stream
+- **`waitForStreamToStop`** - Wait for stream to finish stopping
 - **`clearStreamState`** - Clear stream state
+- **`getStream`** - Get current stream
+- **`setStream`** - Set current stream
+- **`setupAbortCallback`** - Setup abort callback for stream
+- **`updateKeepAlive`** - Update keep alive for stream
+- **`handleStreamLifecycle`** - Handle stream lifecycle events
 
-### Memory & Persistence
+## 🔧 Configuration
 
-- **`todoTool`** - Built-in task management tool
-- **Memory integration** - Automatic conversation persistence
-- **Redis streams** - Durable streaming with resumability
+### Environment Variables
+
+- `DATABASE_URL` - PostgreSQL connection string
+- `OPENAI_API_KEY` - OpenAI API key for GPT-4o
+- `FREESTYLE_API_KEY` - Freestyle API key for MCP tools
+
+### Memory Configuration
+
+The library uses PostgreSQL for persistent memory storage with vector search capabilities. Make sure your database supports the `pgvector` extension.
+
+## 🚀 Deployment
+
+The library is designed to work with Vercel and other serverless platforms. All streaming and memory features are optimized for serverless environments.
+
+## 📚 Examples
+
+See the `src/app/api/chat/route.ts` file for a complete example of how to use the library in a Next.js API route.
+
+## 🛠️ Available Services
+
+### Core Services
+
+- **`sendMessageWithStreaming`** - Main function for AI interactions with streaming
+- **`AIService.sendMessage`** - Lower-level AI service for custom implementations
+- **`builderAgent`** - Pre-configured agent with todo tool
+
+### Stream Management
+
+- **`getStreamState`** - Check current stream status
+- **`isStreamRunning`** - Check if stream is active
+- **`stopStream`** - Stop an active stream
+- **`waitForStreamToStop`** - Wait for stream to finish stopping
+- **`clearStreamState`** - Clear stream state
+- **`getStream`** - Get current stream
+- **`setStream`** - Set current stream
+- **`setupAbortCallback`** - Setup abort callback for stream
+- **`updateKeepAlive`** - Update keep alive for stream
+- **`handleStreamLifecycle`** - Handle stream lifecycle events
 
 ## 🔧 Advanced Usage
 

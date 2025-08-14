@@ -1,3 +1,3 @@
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 
-export const ANTHROPIC_MODEL = anthropic("claude-4-sonnet-20250514");
+export const OPENAI_MODEL = openai("gpt-4o");

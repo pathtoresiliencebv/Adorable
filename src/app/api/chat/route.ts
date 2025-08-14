@@ -52,8 +52,10 @@ export async function POST(req: NextRequest) {
     repoId: app.info.gitRepo,
   });
 
+  // Use the new intelligent agent selection
+  // Pass null as agent to let the system auto-select based on task
   const resumableStream = await sendMessageWithStreaming(
-    builderAgent,
+    null, // Auto-select agent based on task
     appId,
     mcpEphemeralUrl,
     fs,

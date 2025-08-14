@@ -221,7 +221,7 @@ export async function handleStreamLifecycle(
  * This is the main interface that developers should use
  */
 export async function sendMessageWithStreaming(
-  agent: Agent,
+  agent: Agent | null,
   appId: string,
   mcpUrl: string,
   fs: FreestyleDevServerFilesystem,
@@ -239,7 +239,7 @@ export async function sendMessageWithStreaming(
 
   // Use the AI service to handle the AI interaction
   const aiResponse = await AIService.sendMessage(
-    agent,
+    agent, // Can be null for auto-selection
     appId,
     mcpUrl,
     fs,
@@ -263,7 +263,7 @@ export async function sendMessageWithStreaming(
           controller.abort("Aborted stream after step finish");
           const messages = await AIService.getUnsavedMessages(appId);
           console.log(messages);
-          await AIService.saveMessagesToMemory(agent, appId, messages);
+          await AIService.saveMessagesToMemory(agent!, appId, messages);
         }
       },
       onError: async (error: { error: unknown }) => {

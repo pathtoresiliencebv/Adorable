@@ -47,7 +47,7 @@ export default function WebView(props: {
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <Image
-                    src="/placeholder-freestyle-logo.svg"
+                    src="https://www.qreatify.io/placeholder-freestyle-logo.svg"
                     alt="Loading..."
                     width={100}
                     height={100}

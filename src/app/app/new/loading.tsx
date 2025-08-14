@@ -6,7 +6,7 @@ export default function Loading() {
     <div className="flex justify-center items-center h-screen">
       <div className="text-center">
         <Image
-          src="/placeholder-freestyle-logo.svg"
+          src="https://www.qreatify.io/placeholder-freestyle-logo.svg"
           alt="Loading..."
           width={120}
           height={120}

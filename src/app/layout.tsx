@@ -47,7 +47,7 @@ export default function RootLayout({
         className={cn(
           `${geistSans.variable} ${geistMono.variable} antialiased`
         )}
-      >
+      ><StackProvider app={stackServerApp}><StackTheme>
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
@@ -61,7 +61,7 @@ export default function RootLayout({
             <StackTheme>{children}</StackTheme>
           </StackProvider>
         </ThemeProvider>
-      </body>
+      </StackTheme></StackProvider></body>
     </html>
   );
 }

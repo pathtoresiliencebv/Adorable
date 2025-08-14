@@ -68,12 +68,18 @@ export class AIService {
     message: UIMessage,
     options?: Partial<AIStreamOptions>
   ): Promise<AIResponse> {
-    // Use ChatGPT-optimized MCP configuration
-    const { toolsets, mcpClient } = await createChatGPTToolsets(
-      mcpUrl,
-      fs,
-      !!process.env.MORPH_API_KEY
-    );
+    // Create MCP client directly
+    const mcpClient = new MCPClient({
+      id: crypto.randomUUID(),
+      servers: {
+        dev_server: {
+          url: new URL(mcpUrl),
+        },
+      },
+    });
+
+    // Get toolsets from MCP client
+    const toolsets = await mcpClient.getToolsets();
 
     // Save message to memory
     const memory = await agent.getMemory();

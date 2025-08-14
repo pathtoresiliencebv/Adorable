@@ -101,7 +101,7 @@ export class AIService {
       threadId: appId,
     });
 
-    const stream = await agent.stream([], {
+    const stream = await agent.stream([message], {
       threadId: appId,
       resourceId: appId,
       maxSteps: options?.maxSteps ?? 100,

@@ -1,12 +1,16 @@
 "use server";
 
-import { getUser } from "@/auth/stack-auth";
+import { getUserOptional } from "@/auth/stack-auth";
 import { appsTable, appUsers } from "@/db/schema";
 import { db } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 
 export async function getUserApps() {
-  const user = await getUser();
+  const user = await getUserOptional();
+
+  if (!user) {
+    return [];
+  }
 
   const userApps = await db
     .select({

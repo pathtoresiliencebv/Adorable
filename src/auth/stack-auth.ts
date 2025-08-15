@@ -32,3 +32,11 @@ export async function getUser() {
     freestyleIdentity: user.serverMetadata.freestyleIdentity,
   };
 }
+
+export async function getUserOptional() {
+  try {
+    return await getUser();
+  } catch {
+    return null;
+  }
+}

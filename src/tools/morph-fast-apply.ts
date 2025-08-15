@@ -3,6 +3,7 @@ import { z } from "zod";
 import OpenAI from "openai";
 import { FreestyleDevServerFilesystem } from "freestyle-sandboxes";
 import crypto from "crypto";
+import { morphTool as baseMorphTool } from "./morph-tool";
 
 const openai = new OpenAI({
   apiKey: process.env.MORPH_API_KEY,
@@ -223,6 +224,9 @@ async function safeWriteFile(fs: any, target_file: string, newContent: string) {
   }
 }
 
+// Basic Morph Tool (re-export from morph-tool.ts)
+export const morphTool = baseMorphTool;
+
 // Main Fast Apply Tool
 export const fastApplyTool = (fs: FreestyleDevServerFilesystem) =>
   createTool({
@@ -234,7 +238,7 @@ export const fastApplyTool = (fs: FreestyleDevServerFilesystem) =>
       code_edit: z.string().describe("Code changes with markers"),
       priority: z.enum(["low", "medium", "high"]).optional().describe("Edit priority (default: medium)"),
     }),
-    execute: async ({ context: { target_file, instructions, code_edit, priority } }) => {
+    execute: async ({ context: { target_file, instructions, code_edit, priority }, runtimeContext }) => {
       return await fastApplyEdit(fs, target_file, instructions, code_edit, priority || "medium");
     }
   });
@@ -252,7 +256,7 @@ export const batchEditTool = (fs: FreestyleDevServerFilesystem) =>
         priority: z.enum(["low", "medium", "high"]).optional()
       })).describe("Array of file edits to apply"),
     }),
-    execute: async ({ context: { edits } }) => {
+    execute: async ({ context: { edits }, runtimeContext }) => {
       return await batchApplyEdits(fs, edits);
     }
   });
@@ -309,7 +313,7 @@ export const morphMetricsTool = () =>
     id: "get_morph_metrics",
     description: "Get performance metrics for Morph Fast Apply operations",
     inputSchema: z.object({}),
-    execute: async () => {
+    execute: async ({ runtimeContext }) => {
       const metrics = FastApplyMetrics.getInstance();
       return metrics.getMetrics();
     }

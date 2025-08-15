@@ -5,6 +5,8 @@ import { MessageList } from "@mastra/core/agent";
 import { FreestyleDevServerFilesystem } from "freestyle-sandboxes";
 import { AgentFactory, createFallbackMemory } from "@/mastra/agents/builder";
 import { performanceTracker } from "@/lib/ai-models";
+import { isMorphEnabled } from "@/lib/morph-config";
+import { CreditsService } from "@/lib/services/credits-service";
 
 export interface AIStreamOptions {
   threadId: string;
@@ -19,6 +21,8 @@ export interface AIStreamOptions {
   onFinish?: () => void;
   abortSignal?: AbortSignal;
   timeout?: number; // Add timeout option
+  userId?: string; // User ID for credits checking
+  appId?: string; // App ID for usage tracking
 }
 
 export interface AIResponse {
@@ -88,6 +92,14 @@ export class AIService {
     });
     
     try {
+      // Check credits if userId and appId are provided
+      if (options?.userId && options?.appId) {
+        const hasEnoughCredits = await CreditsService.hasEnoughCredits(options.userId, 1);
+        if (!hasEnoughCredits) {
+          throw new Error('Insufficient credits. Please upgrade your plan to continue.');
+        }
+      }
+
       // Auto-select agent if not provided
       if (!agent) {
         const taskType = options?.taskType || this.detectTaskType(message);
@@ -107,12 +119,33 @@ export class AIService {
 
       // Get toolsets from MCP client with timeout
       const toolsetsPromise = mcpClient.getToolsets();
-      const toolsets = await Promise.race([
+      const baseToolsets = await Promise.race([
         toolsetsPromise,
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('MCP toolsets timeout')), 10000)
         )
       ]) as any;
+
+      // Add Morph tools if available
+      let toolsets = { ...baseToolsets };
+      if (isMorphEnabled()) {
+        try {
+          const { morphTool, fastApplyTool, batchEditTool, morphMetricsTool } = await import('@/tools/morph-fast-apply');
+          
+          toolsets.morph = {
+            edit_file: morphTool(fs),
+            fast_edit_file: fastApplyTool(fs),
+            batch_edit_files: batchEditTool(fs),
+            get_morph_metrics: morphMetricsTool(),
+          };
+          
+          console.log('✅ Morph tools added to toolsets');
+        } catch (morphError) {
+          console.warn('⚠️ Failed to load Morph tools:', morphError);
+        }
+      } else {
+        console.log('ℹ️ Morph tools not available - API key not configured');
+      }
 
       // Save message to memory with error handling
       try {
@@ -224,6 +257,28 @@ export class AIService {
         onFinish: async () => {
           // Handle cleanup internally
           await mcpClient.disconnect();
+          
+          // Deduct credits if userId and appId are provided
+          if (options?.userId && options?.appId) {
+            try {
+              const messageLength = message.parts
+                .filter(part => part.type === 'text')
+                .map(part => (part as any).text)
+                .join(' ')
+                .length;
+              
+              await CreditsService.deductCredits(
+                options.userId,
+                options.appId,
+                1,
+                messageLength,
+                { taskType: options.taskType }
+              );
+            } catch (error) {
+              console.error('Error deducting credits:', error);
+              // Don't fail the request if credits deduction fails
+            }
+          }
           
           // Record success metrics
           const endTime = Date.now();

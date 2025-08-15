@@ -29,6 +29,7 @@ export const morphTool = (fs: FreestyleDevServerFilesystem) =>
     }),
     execute: async ({
       context: { target_file, instructions, code_edit: editSnippet },
+      runtimeContext,
     }) => {
       let file;
       try {

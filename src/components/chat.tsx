@@ -29,6 +29,7 @@ export default function Chat(props: {
   });
 
   const { messages, sendMessage } = useChatSafe({
+    api: "/api/chat",
     messages: props.initialMessages,
     id: props.appId,
     resume: props.running && chat?.state === "running",

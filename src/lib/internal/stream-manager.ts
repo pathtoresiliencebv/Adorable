@@ -198,7 +198,23 @@ export async function setStream(
       console.log("⚠️ [STREAM MANAGER] Using fallback stream conversion");
       return new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode(JSON.stringify(responseBody)));
+          // Try to extract the actual content from the response body
+          let content = "No response content available";
+          if (responseBody && typeof responseBody === 'object') {
+            if (responseBody.output) {
+              content = responseBody.output;
+            } else if (responseBody.content) {
+              content = responseBody.content;
+            } else if (responseBody.text) {
+              content = responseBody.text;
+            } else {
+              content = JSON.stringify(responseBody);
+            }
+          }
+          
+          // Format as Server-Sent Events for the frontend
+          const eventData = `data: ${JSON.stringify({ content })}\n\n`;
+          controller.enqueue(new TextEncoder().encode(eventData));
           controller.close();
         }
       }).pipeThrough(new TextDecoderStream());

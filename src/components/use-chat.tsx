@@ -14,6 +14,7 @@ export function useChat(options: {
     onResponse: (response) => {
       console.log("📤 [USE-CHAT] Response received:", response.status, response.statusText);
       console.log("📋 [USE-CHAT] Response headers:", Object.fromEntries(response.headers.entries()));
+      console.log("📦 [USE-CHAT] Response body:", response.body);
     },
     onFinish: (message) => {
       console.log("🏁 [USE-CHAT] Chat finished with message:", message);
@@ -21,6 +22,7 @@ export function useChat(options: {
     onError: (error) => {
       console.error("💥 [USE-CHAT] Chat error:", error);
     },
+    experimental_streamData: true,
   });
 
   console.log("📊 [USE-CHAT] Chat state:", {

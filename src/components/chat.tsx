@@ -33,7 +33,7 @@ export function Chat({ appId }: ChatProps) {
   } = useChat({
     api: "/api/chat",
     headers: {
-      "App-Id": appId,
+      "Adorable-App-Id": appId,
     },
   });
 

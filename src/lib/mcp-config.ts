@@ -1,9 +1,9 @@
 import { MCPClient } from "@mastra/mcp";
 
 /**
- * 🚀 MCP Configuration for ChatGPT Integration
+ * 🚀 MCP Configuration for GPT-5 Integration
  * 
- * This configuration is optimized for ChatGPT (GPT-4o) with Freestyle MCP tools.
+ * This configuration is optimized for GPT-5 with Freestyle MCP tools.
  * It includes enhanced error handling, retry logic, and performance optimizations.
  */
 
@@ -23,32 +23,24 @@ export interface MCPConfig {
 }
 
 export const createMCPClient = (mcpUrl: string): MCPClient => {
-  const config: MCPConfig = {
+  return new MCPClient({
     id: crypto.randomUUID(),
     servers: {
       dev_server: {
         url: new URL(mcpUrl),
       },
     },
-    options: {
-      timeout: parseInt(process.env.MCP_TIMEOUT || '30000'), // 30 seconds
-      maxRetries: parseInt(process.env.MCP_MAX_RETRIES || '3'),
-      retryDelay: parseInt(process.env.MCP_RETRY_DELAY || '1000'), // 1 second
-      keepAlive: process.env.MCP_KEEP_ALIVE === 'true',
-    },
-  };
-
-  return new MCPClient(config);
+  });
 };
 
 /**
- * Enhanced MCP Client with ChatGPT-specific optimizations
+ * 🎯 Enhanced MCP Client with GPT-5 Optimizations
  */
-export class ChatGPTMCPClient {
+export class GPT5MCPClient {
   private client: MCPClient;
   private config: MCPConfig;
 
-  constructor(mcpUrl: string) {
+  constructor(mcpUrl: string, config?: Partial<MCPConfig>) {
     this.config = {
       id: crypto.randomUUID(),
       servers: {
@@ -57,10 +49,11 @@ export class ChatGPTMCPClient {
         },
       },
       options: {
-        timeout: parseInt(process.env.MCP_TIMEOUT || '30000'),
-        maxRetries: parseInt(process.env.MCP_MAX_RETRIES || '3'),
-        retryDelay: parseInt(process.env.MCP_RETRY_DELAY || '1000'),
-        keepAlive: process.env.MCP_KEEP_ALIVE === 'true',
+        timeout: 30000, // 30 seconds
+        maxRetries: 3,
+        retryDelay: 1000,
+        keepAlive: true,
+        ...config?.options,
       },
     };
 
@@ -68,40 +61,26 @@ export class ChatGPTMCPClient {
   }
 
   /**
-   * Get toolsets with enhanced error handling for ChatGPT
+   * Get toolsets with enhanced error handling
    */
   async getToolsets() {
     try {
-      const toolsets = await this.client.getToolsets();
-      
-      // Log available tools for debugging
-      console.log('Available MCP toolsets:', Object.keys(toolsets));
-      
-      return toolsets;
+      return await this.client.getToolsets();
     } catch (error) {
       console.error('Error getting MCP toolsets:', error);
-      
-      // Return empty toolsets if MCP fails
-      return {};
+      throw error;
     }
   }
 
   /**
-   * Disconnect with proper cleanup
+   * Disconnect with cleanup
    */
   async disconnect() {
     try {
       await this.client.disconnect();
     } catch (error) {
-      console.error('Error disconnecting MCP client:', error);
+      console.warn('Error disconnecting MCP client:', error);
     }
-  }
-
-  /**
-   * Get client instance for direct access
-   */
-  getClient(): MCPClient {
-    return this.client;
   }
 }
 
@@ -113,7 +92,7 @@ export const createChatGPTToolsets = async (
   fs: any,
   includeMorph: boolean = false
 ) => {
-  const mcpClient = new ChatGPTMCPClient(mcpUrl);
+  const mcpClient = new GPT5MCPClient(mcpUrl);
   const freestyleToolsets = await mcpClient.getToolsets();
 
   const toolsets: any = {

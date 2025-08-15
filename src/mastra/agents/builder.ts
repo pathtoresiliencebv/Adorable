@@ -127,10 +127,10 @@ export const uiUxAgent = new Agent({
   instructions: `${SYSTEM_MESSAGE}
 
 SPECIALIZATION: UI/UX Design & Frontend Development
-- Create beautiful, accessible, and responsive user interfaces
-- Follow modern design principles and best practices
-- Consider user experience and accessibility requirements
-- Provide both design mockups and implementation code`,
+- Create intuitive, accessible user interfaces
+- Follow modern design principles and patterns
+- Implement responsive and mobile-first designs
+- Focus on user experience and interaction design`,
   memory,
   tools: {
     update_todo_list: todoTool,
@@ -162,9 +162,9 @@ export const securityAgent = new Agent({
 
 SPECIALIZATION: Security & Authentication
 - Implement secure authentication and authorization
-- Follow OWASP security guidelines
-- Identify and fix security vulnerabilities
-- Provide security best practices and recommendations`,
+- Follow security best practices and OWASP guidelines
+- Protect against common vulnerabilities
+- Ensure data privacy and compliance`,
   memory,
   tools: {
     update_todo_list: todoTool,
@@ -195,10 +195,10 @@ export const testingAgent = new Agent({
   instructions: `${SYSTEM_MESSAGE}
 
 SPECIALIZATION: Testing & Quality Assurance
-- Generate comprehensive test suites
-- Implement unit, integration, and end-to-end tests
-- Follow testing best practices and patterns
-- Ensure code quality and reliability`,
+- Create comprehensive test suites
+- Implement automated testing strategies
+- Ensure code quality and reliability
+- Follow testing best practices and methodologies`,
   memory,
   tools: {
     update_todo_list: todoTool,
@@ -222,17 +222,17 @@ SPECIALIZATION: Documentation & Learning
   },
 });
 
-// Quick Tasks Agent (for simple operations)
+// Quick Task Agent
 export const quickTaskAgent = new Agent({
   name: "QuickTaskAgent",
   model: MODEL_STRATEGIES.QUICK_TASKS.primary,
   instructions: `${SYSTEM_MESSAGE}
 
 SPECIALIZATION: Quick Tasks & Simple Operations
-- Provide fast, concise responses for simple tasks
-- Generate quick code snippets and utilities
-- Answer straightforward questions efficiently
-- Focus on speed and simplicity`,
+- Handle simple, straightforward tasks efficiently
+- Provide fast, accurate responses
+- Focus on practical solutions
+- Minimize complexity for simple operations`,
   memory,
   tools: {
     update_todo_list: todoTool,
@@ -289,13 +289,10 @@ export class AgentFactory {
       return this.getOrCreateAgent('quick-task', quickTaskAgent);
     }
     
-    // Default to the main builder agent
+    // Default to builder agent for general tasks
     return this.getOrCreateAgent('builder', builderAgent);
   }
 
-  /**
-   * Get or create an agent instance
-   */
   private static getOrCreateAgent(name: string, agent: Agent): Agent {
     if (!this.agents.has(name)) {
       this.agents.set(name, agent);
@@ -327,14 +324,11 @@ export class AgentFactory {
   static getAgentStats(): Record<string, any> {
     const stats: Record<string, any> = {};
     
-    for (const [name, agent] of this.agents.entries()) {
-      const modelId = agent.model?.modelId || 'unknown';
-      const metrics = performanceTracker.getAverageMetrics(modelId);
-      
+    for (const [name, agent] of Object.entries(this.getAllAgents())) {
       stats[name] = {
-        model: modelId,
-        metrics,
-        memorySize: agent.memory ? 'configured' : 'not configured',
+        modelId: agent.model?.modelId || 'unknown',
+        name: agent.name,
+        metrics: performanceTracker.getAverageMetrics(agent.model?.modelId || 'unknown'),
       };
     }
     
@@ -373,16 +367,3 @@ export const getBuilderAgent = () => {
     return createBuilderAgent();
   }
 };
-
-/**
- * 🎯 Quick access to specialized agents
- */
-export const getArchitectureAgent = () => architectureAgent;
-export const getDebuggingAgent = () => debuggingAgent;
-export const getUIUXAgent = () => uiUxAgent;
-export const getBackendAgent = () => backendAgent;
-export const getSecurityAgent = () => securityAgent;
-export const getPerformanceAgent = () => performanceAgent;
-export const getTestingAgent = () => testingAgent;
-export const getDocumentationAgent = () => documentationAgent;
-export const getQuickTaskAgent = () => quickTaskAgent;

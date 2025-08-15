@@ -16,6 +16,11 @@ export function useChatSafe(
   const id = options.id;
   const resume = options?.resume;
 
+  // Set default API if not provided
+  if (!options.api) {
+    options.api = "/api/chat";
+  }
+
   options.resume = undefined;
 
   const onFinish = options.onFinish;

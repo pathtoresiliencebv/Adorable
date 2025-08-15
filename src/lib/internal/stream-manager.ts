@@ -7,6 +7,9 @@ import { redis } from "./redis";
 // Stream state management
 const streamStates = new Map<string, { state: "running" | "finished" | "error"; timestamp: number }>();
 
+// Active streams storage
+const activeStreams = new Map<string, { response: () => Response }>();
+
 export async function isStreamRunning(appId: string): Promise<boolean> {
   const state = streamStates.get(appId);
   return state?.state === "running";
@@ -19,6 +22,12 @@ export async function stopStream(appId: string): Promise<void> {
     state.timestamp = Date.now();
     streamStates.set(appId, state);
   }
+  
+  // Clear active stream
+  activeStreams.delete(appId);
+  
+  // Trigger abort if callback exists
+  await triggerAbort(appId);
 }
 
 export async function waitForStreamToStop(appId: string, timeout = 10000): Promise<boolean> {
@@ -37,6 +46,7 @@ export async function waitForStreamToStop(appId: string, timeout = 10000): Promi
 
 export async function clearStreamState(appId: string): Promise<void> {
   streamStates.delete(appId);
+  activeStreams.delete(appId);
 }
 
 export async function updateKeepAlive(appId: string): Promise<void> {
@@ -62,6 +72,20 @@ export async function triggerAbort(appId: string): Promise<void> {
   }
 }
 
+/**
+ * Get current stream for an app
+ */
+export async function getStream(appId: string): Promise<{ response: () => Response } | null> {
+  return activeStreams.get(appId) || null;
+}
+
+/**
+ * Store active stream
+ */
+export async function storeStream(appId: string, stream: { response: () => Response }): Promise<void> {
+  activeStreams.set(appId, stream);
+}
+
 export async function handleStreamLifecycle(
   appId: string,
   event: "start" | "finish" | "error"
@@ -72,9 +96,11 @@ export async function handleStreamLifecycle(
       break;
     case "finish":
       streamStates.set(appId, { state: "finished", timestamp: Date.now() });
+      activeStreams.delete(appId);
       break;
     case "error":
       streamStates.set(appId, { state: "error", timestamp: Date.now() });
+      activeStreams.delete(appId);
       break;
   }
 }
@@ -205,6 +231,20 @@ export async function sendMessageWithStreaming(
       throw new Error("Invalid stream format - missing toUIMessageStreamResponse method");
     }
 
+    // Store the stream for later retrieval
+    await storeStream(appId, {
+      response: () => {
+        const streamResponse = aiResponse.stream.toUIMessageStreamResponse();
+        return new Response(streamResponse.body, {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
+        });
+      }
+    });
+
     return aiResponse;
   } catch (error) {
     console.error("Error in sendMessageWithStreaming:", error);
@@ -233,6 +273,7 @@ export async function cleanupOldStreams(maxAge = 3600000): Promise<void> {
     if (now - state.timestamp > maxAge) {
       streamStates.delete(appId);
       abortCallbacks.delete(appId);
+      activeStreams.delete(appId);
     }
   }
 }

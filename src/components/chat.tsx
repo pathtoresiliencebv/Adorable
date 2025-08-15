@@ -131,11 +131,17 @@ export default function Chat(props: {
 }
 
 function MessageBody({ message }: { message: any }) {
-  if (message.role === "user") {
+  // Normalize message format: convert content string to parts array if needed
+  const normalizedMessage = { ...message };
+  if (message.content && !message.parts) {
+    normalizedMessage.parts = [{ type: "text", text: message.content }];
+  }
+
+  if (normalizedMessage.role === "user") {
     return (
       <div className="flex justify-end py-1 mb-4">
         <div className="bg-neutral-200 dark:bg-neutral-700 rounded-xl px-4 py-1 max-w-[80%] ml-auto">
-          {message.parts.map((part: any, index: number) => {
+          {normalizedMessage.parts?.map((part: any, index: number) => {
             if (part.type === "text") {
               return <div key={index}>{part.text}</div>;
             } else if (
@@ -156,16 +162,16 @@ function MessageBody({ message }: { message: any }) {
               );
             }
             return <div key={index}>unexpected message</div>;
-          })}
+          }) || <div>{normalizedMessage.content}</div>}
         </div>
       </div>
     );
   }
 
-  if (Array.isArray(message.parts) && message.parts.length !== 0) {
+  if (Array.isArray(normalizedMessage.parts) && normalizedMessage.parts.length !== 0) {
     return (
       <div className="mb-4">
-        {message.parts.map((part: any, index: any) => {
+        {normalizedMessage.parts.map((part: any, index: any) => {
           if (part.type === "text") {
             return (
               <div key={index} className="mb-4">
@@ -184,15 +190,26 @@ function MessageBody({ message }: { message: any }) {
     );
   }
 
-  if (message.parts) {
+  if (normalizedMessage.parts) {
     return (
       <Markdown className="prose prose-sm dark:prose-invert max-w-none">
-        {message.parts
+        {normalizedMessage.parts
           .map((part: any) =>
             part.type === "text" ? part.text : "[something went wrong]"
           )
           .join("")}
       </Markdown>
+    );
+  }
+
+  // Fallback for content string
+  if (normalizedMessage.content) {
+    return (
+      <div className="mb-4">
+        <Markdown className="prose prose-sm dark:prose-invert max-w-none">
+          {normalizedMessage.content}
+        </Markdown>
+      </div>
     );
   }
 

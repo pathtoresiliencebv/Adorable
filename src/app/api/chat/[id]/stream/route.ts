@@ -5,14 +5,36 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  console.log("GET stream for appId:", (await params).id);
-  const currentStream = await getStream((await params).id);
+  const appId = (await params).id;
+  console.log("🔍 [STREAM ROUTE] GET stream for appId:", appId);
+  
+  try {
+    const currentStream = await getStream(appId);
+    console.log("📡 [STREAM ROUTE] Current stream exists:", !!currentStream);
 
-  if (!currentStream) {
-    return new Response();
+    if (!currentStream) {
+      console.log("❌ [STREAM ROUTE] No stream found, returning empty response");
+      return new Response(null, { 
+        status: 204,
+        headers: {
+          "Cache-Control": "no-cache",
+          "Content-Type": "text/plain",
+        },
+      });
+    }
+
+    console.log("✅ [STREAM ROUTE] Returning stream response");
+    return currentStream.response();
+  } catch (error) {
+    console.error("💥 [STREAM ROUTE] Error getting stream:", error);
+    return new Response("Stream error", { 
+      status: 500,
+      headers: {
+        "Cache-Control": "no-cache",
+        "Content-Type": "text/plain",
+      },
+    });
   }
-
-  return currentStream?.response();
 }
 
 export async function DELETE(

@@ -1,7 +1,4 @@
-import { openai } from "@ai-sdk/openai";
+import { anthropic } from "@ai-sdk/anthropic";
 
-// Simple OpenAI configuration
-export const OPENAI_MODEL = openai("gpt-4o", {
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL: "https://api.openai.com/v1",
-});
+// Original Adorable uses Anthropic Claude models
+export const ANTHROPIC_MODEL = anthropic("claude-3-7-sonnet-20250219");

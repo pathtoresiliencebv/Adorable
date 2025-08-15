@@ -1,106 +1,253 @@
+import { UIMessage } from "ai";
+import { after } from "next/server";
+import { createResumableStreamContext } from "resumable-stream";
+import { redis, redisPublisher } from "./redis";
+import { AIService } from "./ai-service";
 import { Agent } from "@mastra/core/agent";
 import { FreestyleDevServerFilesystem } from "freestyle-sandboxes";
-import { UIMessage } from "ai";
-import { AIService } from "./ai-service";
-import { redis } from "./redis";
 
-// Stream state management
-const streamStates = new Map<string, { state: "running" | "finished" | "error"; timestamp: number }>();
+const streamContext = createResumableStreamContext({
+  waitUntil: after,
+});
 
-// Active streams storage
-const activeStreams = new Map<string, { response: () => Response }>();
+export interface StreamState {
+  state: string | null;
+}
 
+export interface StreamResponse {
+  response(): Response;
+}
+
+export interface StreamInfo {
+  readableStream(): Promise<ReadableStream<string>>;
+  response(): Promise<Response>;
+}
+
+/**
+ * Get the current stream state for an app
+ */
+export async function getStreamState(appId: string): Promise<StreamState> {
+  console.log("🔍 [STREAM MANAGER] Getting stream state for appId:", appId);
+  const state = await redisPublisher.get(`app:${appId}:stream-state`);
+  console.log("📊 [STREAM MANAGER] Stream state:", state);
+  return { state };
+}
+
+/**
+ * Check if a stream is currently running for an app
+ */
 export async function isStreamRunning(appId: string): Promise<boolean> {
-  const state = streamStates.get(appId);
-  return state?.state === "running";
+  console.log("🔍 [STREAM MANAGER] Checking if stream is running for appId:", appId);
+  const state = await redisPublisher.get(`app:${appId}:stream-state`);
+  const isRunning = state === "running";
+  console.log("🔄 [STREAM MANAGER] Stream running:", isRunning);
+  return isRunning;
 }
 
+/**
+ * Stop a running stream for an app
+ */
 export async function stopStream(appId: string): Promise<void> {
-  const state = streamStates.get(appId);
-  if (state?.state === "running") {
-    state.state = "error";
-    state.timestamp = Date.now();
-    streamStates.set(appId, state);
-  }
-  
-  // Clear active stream
-  activeStreams.delete(appId);
-  
-  // Trigger abort if callback exists
-  await triggerAbort(appId);
+  console.log("🛑 [STREAM MANAGER] Stopping stream for appId:", appId);
+  await redisPublisher.publish(
+    `events:${appId}`,
+    JSON.stringify({ type: "abort-stream" })
+  );
+  await redisPublisher.del(`app:${appId}:stream-state`);
+  console.log("✅ [STREAM MANAGER] Stream stop command sent");
 }
 
-export async function waitForStreamToStop(appId: string, timeout = 10000): Promise<boolean> {
-  const startTime = Date.now();
-  
-  while (Date.now() - startTime < timeout) {
-    const state = streamStates.get(appId);
-    if (state?.state !== "running") {
+/**
+ * Wait for a stream to stop (with timeout)
+ */
+export async function waitForStreamToStop(
+  appId: string,
+  maxAttempts: number = 60
+): Promise<boolean> {
+  console.log("⏳ [STREAM MANAGER] Waiting for stream to stop, max attempts:", maxAttempts);
+  for (let i = 0; i < maxAttempts; i++) {
+    const state = await redisPublisher.get(`app:${appId}:stream-state`);
+    if (!state) {
+      console.log("✅ [STREAM MANAGER] Stream stopped successfully");
       return true;
     }
-    await new Promise(resolve => setTimeout(resolve, 100));
+    console.log(`⏳ [STREAM MANAGER] Attempt ${i + 1}/${maxAttempts}, state:`, state);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  
+  console.log("❌ [STREAM MANAGER] Stream did not stop within timeout");
   return false;
 }
 
+/**
+ * Clear the stream state for an app
+ */
 export async function clearStreamState(appId: string): Promise<void> {
-  streamStates.delete(appId);
-  activeStreams.delete(appId);
+  console.log("🧹 [STREAM MANAGER] Clearing stream state for appId:", appId);
+  await redisPublisher.del(`app:${appId}:stream-state`);
+  console.log("✅ [STREAM MANAGER] Stream state cleared");
 }
 
+/**
+ * Get an existing stream for an app
+ */
+export async function getStream(appId: string): Promise<StreamInfo | null> {
+  console.log("🔍 [STREAM MANAGER] Getting existing stream for appId:", appId);
+  const hasStream = await streamContext.hasExistingStream(appId);
+  console.log("📊 [STREAM MANAGER] Has existing stream:", hasStream);
+  if (hasStream === true) {
+    return {
+      async readableStream() {
+        console.log("📖 [STREAM MANAGER] Resuming existing readable stream");
+        const stream = await streamContext.resumeExistingStream(appId);
+        if (!stream) {
+          console.error("❌ [STREAM MANAGER] Failed to resume existing stream");
+          throw new Error("Failed to resume existing stream");
+        }
+        console.log("✅ [STREAM MANAGER] Existing readable stream resumed");
+        return stream;
+      },
+      async response() {
+        console.log("📤 [STREAM MANAGER] Resuming existing response stream");
+        const resumableStream = await streamContext.resumeExistingStream(appId);
+        if (!resumableStream) {
+          console.error("❌ [STREAM MANAGER] Failed to resume existing response stream");
+          throw new Error("Failed to resume existing response stream");
+        }
+        console.log("✅ [STREAM MANAGER] Existing response stream resumed");
+        return new Response(resumableStream, {
+          headers: {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+            "x-vercel-ai-ui-message-stream": "v1",
+            "x-accel-buffering": "no",
+          },
+        });
+      },
+    };
+  }
+  console.log("❌ [STREAM MANAGER] No existing stream found");
+  return null;
+}
+
+/**
+ * Set up a new stream for an app
+ */
+export async function setStream(
+  appId: string,
+  prompt: UIMessage,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  stream: any
+): Promise<StreamResponse> {
+  console.log("🆕 [STREAM MANAGER] Setting up new stream for appId:", appId);
+  
+  if (!stream.toUIMessageStreamResponse) {
+    console.error("❌ [STREAM MANAGER] Stream missing toUIMessageStreamResponse method!");
+    throw new Error("Stream missing required toUIMessageStreamResponse method");
+  }
+
+  const responseBody = stream.toUIMessageStreamResponse().body;
+  console.log("📦 [STREAM MANAGER] Response body exists:", !!responseBody);
+
+  if (!responseBody) {
+    console.error("❌ [STREAM MANAGER] Response body is undefined!");
+    throw new Error(
+      "Error creating resumable stream: response body is undefined"
+    );
+  }
+
+  console.log("💾 [STREAM MANAGER] Setting stream state to running");
+  await redisPublisher.set(`app:${appId}:stream-state`, "running", {
+    EX: 15,
+  });
+
+  console.log("🔄 [STREAM MANAGER] Creating resumable stream");
+  const resumableStream = await streamContext.createNewResumableStream(
+    appId,
+    () => {
+      console.log("📤 [STREAM MANAGER] Creating readable stream from response body");
+      return responseBody.pipeThrough(
+        new TextDecoderStream()
+      ) as ReadableStream<string>;
+    }
+  );
+
+  if (!resumableStream) {
+    console.error("❌ [STREAM MANAGER] Failed to create resumable stream");
+    throw new Error("Failed to create resumable stream");
+  }
+
+  console.log("✅ [STREAM MANAGER] Resumable stream created successfully");
+
+  return {
+    response() {
+      console.log("🎯 [STREAM MANAGER] Setting up response with abort callback");
+      // Set up abort callback directly since this is a synchronous context
+      redis.subscribe(`events:${appId}`, (event) => {
+        const data = JSON.parse(event);
+        if (data.type === "abort-stream") {
+          console.log("🛑 [STREAM MANAGER] Cancelling http stream");
+          resumableStream?.cancel();
+        }
+      });
+
+      console.log("📤 [STREAM MANAGER] Returning response with headers");
+      return new Response(resumableStream, {
+        headers: {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+          "x-vercel-ai-ui-message-stream": "v1",
+          "x-accel-buffering": "no",
+        },
+        status: 200,
+      });
+    },
+  };
+}
+
+/**
+ * Set up an abort callback for a stream
+ */
+export async function setupAbortCallback(
+  appId: string,
+  callback: () => void
+): Promise<void> {
+  console.log("🎯 [STREAM MANAGER] Setting up abort callback for appId:", appId);
+  redis.subscribe(`events:${appId}`, (event) => {
+    const data = JSON.parse(event);
+    if (data.type === "abort-stream") {
+      console.log("🛑 [STREAM MANAGER] Abort callback triggered");
+      callback();
+    }
+  });
+}
+
+/**
+ * Update the keep-alive timestamp for a stream
+ */
 export async function updateKeepAlive(appId: string): Promise<void> {
-  const state = streamStates.get(appId);
-  if (state) {
-    state.timestamp = Date.now();
-    streamStates.set(appId, state);
-  }
-}
-
-// Abort callback management
-const abortCallbacks = new Map<string, () => void>();
-
-export async function setupAbortCallback(appId: string, callback: () => void): Promise<void> {
-  abortCallbacks.set(appId, callback);
-}
-
-export async function triggerAbort(appId: string): Promise<void> {
-  const callback = abortCallbacks.get(appId);
-  if (callback) {
-    callback();
-    abortCallbacks.delete(appId);
-  }
+  console.log("💓 [STREAM MANAGER] Updating keep-alive for appId:", appId);
+  await redisPublisher.set(`app:${appId}:stream-state`, "running", {
+    EX: 15,
+  });
 }
 
 /**
- * Get current stream for an app
+ * Handle stream lifecycle events (start, finish, error)
  */
-export async function getStream(appId: string): Promise<{ response: () => Response } | null> {
-  return activeStreams.get(appId) || null;
-}
-
-/**
- * Store active stream
- */
-export async function storeStream(appId: string, stream: { response: () => Response }): Promise<void> {
-  activeStreams.set(appId, stream);
-}
-
 export async function handleStreamLifecycle(
   appId: string,
   event: "start" | "finish" | "error"
 ): Promise<void> {
+  console.log(`🎭 [STREAM MANAGER] Stream lifecycle event: ${event} for appId:`, appId);
   switch (event) {
     case "start":
-      streamStates.set(appId, { state: "running", timestamp: Date.now() });
+      await updateKeepAlive(appId);
       break;
     case "finish":
-      streamStates.set(appId, { state: "finished", timestamp: Date.now() });
-      activeStreams.delete(appId);
-      break;
     case "error":
-      streamStates.set(appId, { state: "error", timestamp: Date.now() });
-      activeStreams.delete(appId);
+      await clearStreamState(appId);
       break;
   }
 }
@@ -110,158 +257,88 @@ export async function handleStreamLifecycle(
  * This is the main interface that developers should use
  */
 export async function sendMessageWithStreaming(
-  agent: Agent | null,
+  agent: Agent,
   appId: string,
   mcpUrl: string,
   fs: FreestyleDevServerFilesystem,
   message: UIMessage
 ) {
+  console.log("🚀 [STREAM MANAGER] sendMessageWithStreaming started");
+  console.log("🤖 [STREAM MANAGER] Agent:", agent.name);
+  console.log("🆔 [STREAM MANAGER] AppId:", appId);
+  console.log("🔗 [STREAM MANAGER] MCP URL:", mcpUrl ? "YES" : "NO");
+  console.log("💬 [STREAM MANAGER] Message:", message);
+  
   const controller = new AbortController();
   let shouldAbort = false;
 
   // Set up abort callback
+  console.log("🎯 [STREAM MANAGER] Setting up abort callback");
   await setupAbortCallback(appId, () => {
     shouldAbort = true;
+    console.log("🛑 [STREAM MANAGER] Abort flag set to true");
   });
 
   let lastKeepAlive = Date.now();
 
-  try {
-    // Use the AI service to handle the AI interaction with timeout
-    const aiResponse = await AIService.sendMessage(
-      agent, // Can be null for auto-selection
-      appId,
-      mcpUrl,
-      fs,
-      message,
-      {
-        threadId: appId,
-        resourceId: appId,
-        maxSteps: 100,
-        maxRetries: 0,
-        maxOutputTokens: 64000,
-        timeout: 30000, // 30 second timeout
-        async onChunk() {
-          if (Date.now() - lastKeepAlive > 5000) {
-            lastKeepAlive = Date.now();
-            await updateKeepAlive(appId);
-          }
-        },
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        async onStepFinish(_step: { response: { messages: unknown[] } }) {
-          if (shouldAbort) {
-            await handleStreamLifecycle(appId, "error");
-            controller.abort("Aborted stream after step finish");
-            const messages = await AIService.getUnsavedMessages(appId);
-            console.log(messages);
-            if (agent) {
-              await AIService.saveMessagesToMemory(agent, appId, messages);
-            }
-          }
-        },
-        onError: async (error: { error: unknown }) => {
-          console.error("Stream error in manager:", error);
-          
-          // Handle specific AI_APICallError for reasoning items
-          if (error.error && typeof error.error === 'object' && 'name' in error.error) {
-            const apiError = error.error as any;
-            if (apiError.name === 'AI_APICallError' && apiError.message?.includes('reasoning')) {
-              console.warn('Reasoning item error in stream manager, attempting recovery...');
-              
-              // Try to recover with a simpler approach
-              try {
-                const fallbackResponse = await AIService.sendMessage(
-                  agent,
-                  appId,
-                  mcpUrl,
-                  fs,
-                  message,
-                  {
-                    threadId: appId,
-                    resourceId: appId,
-                    maxSteps: 50,
-                    maxRetries: 0,
-                    maxOutputTokens: 32000,
-                    timeout: 15000, // Shorter timeout for fallback
-                    async onChunk() {
-                      if (Date.now() - lastKeepAlive > 5000) {
-                        lastKeepAlive = Date.now();
-                        await updateKeepAlive(appId);
-                      }
-                    },
-                    async onStepFinish(step: { response: { messages: unknown[] } }) {
-                      if (shouldAbort) {
-                        await handleStreamLifecycle(appId, "error");
-                        controller.abort("Aborted fallback stream after step finish");
-                        const messages = await AIService.getUnsavedMessages(appId);
-                        if (agent) {
-                          await AIService.saveMessagesToMemory(agent, appId, messages);
-                        }
-                      }
-                    },
-                    onError: async (fallbackError: { error: unknown }) => {
-                      console.error("Fallback stream error:", fallbackError);
-                      await handleStreamLifecycle(appId, "error");
-                    },
-                    onFinish: async () => {
-                      await handleStreamLifecycle(appId, "finish");
-                    },
-                    abortSignal: controller.signal,
-                  }
-                );
-                
-                return fallbackResponse;
-              } catch (fallbackError) {
-                console.error('Fallback stream also failed:', fallbackError);
-              }
-            }
-          }
-          
+  console.log("🤖 [STREAM MANAGER] Calling AIService.sendMessage");
+  // Use the AI service to handle the AI interaction
+  const aiResponse = await AIService.sendMessage(
+    agent,
+    appId,
+    mcpUrl,
+    fs,
+    message,
+    {
+      threadId: appId,
+      resourceId: appId,
+      maxSteps: 100,
+      maxRetries: 0,
+      maxOutputTokens: 64000,
+      async onChunk() {
+        if (Date.now() - lastKeepAlive > 5000) {
+          lastKeepAlive = Date.now();
+          console.log("💓 [STREAM MANAGER] Sending keep-alive");
+          await updateKeepAlive(appId);
+        }
+      },
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async onStepFinish(_step: { response: { messages: unknown[] } }) {
+        console.log("✅ [STREAM MANAGER] Step finished");
+        if (shouldAbort) {
+          console.log("🛑 [STREAM MANAGER] Aborting after step finish");
           await handleStreamLifecycle(appId, "error");
-        },
-        onFinish: async () => {
-          await handleStreamLifecycle(appId, "finish");
-        },
-        abortSignal: controller.signal,
-      }
-    );
-
-    // Ensure the stream has the proper method
-    if (!aiResponse.stream.toUIMessageStreamResponse) {
-      throw new Error("Invalid stream format - missing toUIMessageStreamResponse method");
+          controller.abort("Aborted stream after step finish");
+          const messages = await AIService.getUnsavedMessages(appId);
+          console.log("💾 [STREAM MANAGER] Unsaved messages:", messages);
+          await AIService.saveMessagesToMemory(agent, appId, messages);
+        }
+      },
+      onError: async (error: { error: unknown }) => {
+        console.error("💥 [STREAM MANAGER] Stream error in manager:", error);
+        await handleStreamLifecycle(appId, "error");
+      },
+      onFinish: async () => {
+        console.log("🏁 [STREAM MANAGER] Stream finished");
+        await handleStreamLifecycle(appId, "finish");
+      },
+      abortSignal: controller.signal,
     }
+  );
 
-    // Store the stream for later retrieval
-    await storeStream(appId, {
-      response: () => {
-        const streamResponse = aiResponse.stream.toUIMessageStreamResponse();
-        return new Response(streamResponse.body, {
-          headers: {
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-          },
-        });
-      }
-    });
+  console.log("📦 [STREAM MANAGER] AI response received");
+  console.log("🔍 [STREAM MANAGER] Stream has toUIMessageStreamResponse:", !!aiResponse.stream.toUIMessageStreamResponse);
 
-    return aiResponse;
-  } catch (error) {
-    console.error("Error in sendMessageWithStreaming:", error);
-    await handleStreamLifecycle(appId, "error");
-    throw error;
+  // Ensure the stream has the proper method
+  if (!aiResponse.stream.toUIMessageStreamResponse) {
+    console.error("❌ [STREAM MANAGER] Stream missing toUIMessageStreamResponse method!");
+    throw new Error(
+      "Invalid stream format - missing toUIMessageStreamResponse method"
+    );
   }
-}
 
-/**
- * Get current stream state
- */
-export async function getStreamState(appId: string): Promise<{ state: "running" | "finished" | "error" | "idle"; timestamp: number }> {
-  const state = streamStates.get(appId);
-  if (!state) {
-    return { state: "idle", timestamp: Date.now() };
-  }
-  return state;
+  console.log("🆕 [STREAM MANAGER] Setting up stream");
+  return await setStream(appId, message, aiResponse.stream);
 }
 
 /**
@@ -269,11 +346,11 @@ export async function getStreamState(appId: string): Promise<{ state: "running" 
  */
 export async function cleanupOldStreams(maxAge = 3600000): Promise<void> {
   const now = Date.now();
-  for (const [appId, state] of streamStates.entries()) {
+  for (const [appId, state] of streamContext.getStreamStates().entries()) {
     if (now - state.timestamp > maxAge) {
-      streamStates.delete(appId);
-      abortCallbacks.delete(appId);
-      activeStreams.delete(appId);
+      console.log("🧹 [STREAM MANAGER] Cleaning up old stream state for appId:", appId);
+      await redisPublisher.del(`app:${appId}:stream-state`);
+      console.log("✅ [STREAM MANAGER] Stream state cleared for old stream");
     }
   }
 }

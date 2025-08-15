@@ -101,7 +101,7 @@ export async function sendMessageWithStreaming(
   let lastKeepAlive = Date.now();
 
   try {
-    // Use the AI service to handle the AI interaction
+    // Use the AI service to handle the AI interaction with timeout
     const aiResponse = await AIService.sendMessage(
       agent, // Can be null for auto-selection
       appId,
@@ -114,6 +114,7 @@ export async function sendMessageWithStreaming(
         maxSteps: 100,
         maxRetries: 0,
         maxOutputTokens: 64000,
+        timeout: 30000, // 30 second timeout
         async onChunk() {
           if (Date.now() - lastKeepAlive > 5000) {
             lastKeepAlive = Date.now();
@@ -155,6 +156,7 @@ export async function sendMessageWithStreaming(
                     maxSteps: 50,
                     maxRetries: 0,
                     maxOutputTokens: 32000,
+                    timeout: 15000, // Shorter timeout for fallback
                     async onChunk() {
                       if (Date.now() - lastKeepAlive > 5000) {
                         lastKeepAlive = Date.now();

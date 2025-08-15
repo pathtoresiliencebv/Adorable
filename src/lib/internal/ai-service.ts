@@ -18,6 +18,7 @@ export interface AIStreamOptions {
   onError?: (error: { error: unknown }) => void;
   onFinish?: () => void;
   abortSignal?: AbortSignal;
+  timeout?: number; // Add timeout option
 }
 
 export interface AIResponse {
@@ -67,59 +68,83 @@ export class AIService {
     options?: Partial<AIStreamOptions>
   ): Promise<AIResponse> {
     const startTime = Date.now();
+    const timeout = options?.timeout || 60000; // 60 seconds default timeout
     
-    // Auto-select agent if not provided
-    if (!agent) {
-      const taskType = options?.taskType || this.detectTaskType(message);
-      agent = await AgentFactory.getAgentForTask(taskType);
-      console.log(`🤖 Auto-selected agent for task: ${taskType} -> ${agent.name}`);
+    // Create a timeout controller
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => {
+      timeoutController.abort();
+    }, timeout);
+    
+    // Combine abort signals
+    const combinedAbortController = new AbortController();
+    if (options?.abortSignal) {
+      options.abortSignal.addEventListener('abort', () => {
+        combinedAbortController.abort();
+      });
     }
-
-    // Create MCP client directly
-    const mcpClient = new MCPClient({
-      id: crypto.randomUUID(),
-      servers: {
-        dev_server: {
-          url: new URL(mcpUrl),
-        },
-      },
+    timeoutController.signal.addEventListener('abort', () => {
+      combinedAbortController.abort();
     });
-
-    // Get toolsets from MCP client
-    const toolsets = await mcpClient.getToolsets();
-
-    // Save message to memory with error handling
+    
     try {
-      const memory = await agent.getMemory();
-      if (memory) {
-        await memory.saveMessages({
-          messages: [
-            {
-              content: {
-                parts: message.parts,
-                format: 3,
-              },
-              role: "user",
-              createdAt: new Date(),
-              id: message.id,
-              threadId: appId,
-              type: "text",
-              resourceId: appId,
-            },
-          ],
-        });
+      // Auto-select agent if not provided
+      if (!agent) {
+        const taskType = options?.taskType || this.detectTaskType(message);
+        agent = await AgentFactory.getAgentForTask(taskType);
+        console.log(`🤖 Auto-selected agent for task: ${taskType} -> ${agent.name}`);
       }
-    } catch (memoryError) {
-      console.warn("Failed to save message to memory, continuing without memory:", memoryError);
-      // Continue without memory if database is not available
-    }
 
-    const messageList = new MessageList({
-      resourceId: appId,
-      threadId: appId,
-    });
+      // Create MCP client directly
+      const mcpClient = new MCPClient({
+        id: crypto.randomUUID(),
+        servers: {
+          dev_server: {
+            url: new URL(mcpUrl),
+          },
+        },
+      });
 
-    try {
+      // Get toolsets from MCP client with timeout
+      const toolsetsPromise = mcpClient.getToolsets();
+      const toolsets = await Promise.race([
+        toolsetsPromise,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('MCP toolsets timeout')), 10000)
+        )
+      ]) as any;
+
+      // Save message to memory with error handling
+      try {
+        const memory = await agent.getMemory();
+        if (memory) {
+          await memory.saveMessages({
+            messages: [
+              {
+                content: {
+                  parts: message.parts,
+                  format: 3,
+                },
+                role: "user",
+                createdAt: new Date(),
+                id: message.id,
+                threadId: appId,
+                type: "text",
+                resourceId: appId,
+              },
+            ],
+          });
+        }
+      } catch (memoryError) {
+        console.warn("Failed to save message to memory, continuing without memory:", memoryError);
+        // Continue without memory if database is not available
+      }
+
+      const messageList = new MessageList({
+        resourceId: appId,
+        threadId: appId,
+      });
+
       const stream = await agent.stream([message], {
         threadId: appId,
         resourceId: appId,
@@ -178,7 +203,7 @@ export class AIService {
                     await mcpClient.disconnect();
                     options?.onFinish?.();
                   },
-                  abortSignal: options?.abortSignal,
+                  abortSignal: combinedAbortController.signal,
                 });
                 
                 return {
@@ -211,8 +236,11 @@ export class AIService {
           
           options?.onFinish?.();
         },
-        abortSignal: options?.abortSignal,
+        abortSignal: combinedAbortController.signal,
       });
+
+      // Clear timeout since we got a response
+      clearTimeout(timeoutId);
 
       return {
         stream: {
@@ -222,12 +250,15 @@ export class AIService {
         },
       };
     } catch (error) {
+      // Clear timeout
+      clearTimeout(timeoutId);
+      
       // Handle cleanup on error
-      await mcpClient.disconnect();
+      console.error("AI Service error:", error);
       
       // Record error metrics
       const endTime = Date.now();
-      performanceTracker.recordMetrics(agent.model?.modelId || 'unknown', {
+      performanceTracker.recordMetrics(agent?.model?.modelId || 'unknown', {
         responseTime: endTime - startTime,
         tokenUsage: 0,
         successRate: 0,

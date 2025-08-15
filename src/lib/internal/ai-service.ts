@@ -3,7 +3,7 @@ import { MCPClient } from "@mastra/mcp";
 import { Agent } from "@mastra/core/agent";
 import { MessageList } from "@mastra/core/agent";
 import { FreestyleDevServerFilesystem } from "freestyle-sandboxes";
-import { AgentFactory } from "@/mastra/agents/builder";
+import { AgentFactory, createFallbackMemory } from "@/mastra/agents/builder";
 import { performanceTracker } from "@/lib/ai-models";
 
 export interface AIStreamOptions {
@@ -88,25 +88,30 @@ export class AIService {
     // Get toolsets from MCP client
     const toolsets = await mcpClient.getToolsets();
 
-    // Save message to memory
-    const memory = await agent.getMemory();
-    if (memory) {
-      await memory.saveMessages({
-        messages: [
-          {
-            content: {
-              parts: message.parts,
-              format: 3,
+    // Save message to memory with error handling
+    try {
+      const memory = await agent.getMemory();
+      if (memory) {
+        await memory.saveMessages({
+          messages: [
+            {
+              content: {
+                parts: message.parts,
+                format: 3,
+              },
+              role: "user",
+              createdAt: new Date(),
+              id: message.id,
+              threadId: appId,
+              type: "text",
+              resourceId: appId,
             },
-            role: "user",
-            createdAt: new Date(),
-            id: message.id,
-            threadId: appId,
-            type: "text",
-            resourceId: appId,
-          },
-        ],
-      });
+          ],
+        });
+      }
+    } catch (memoryError) {
+      console.warn("Failed to save message to memory, continuing without memory:", memoryError);
+      // Continue without memory if database is not available
     }
 
     const messageList = new MessageList({
@@ -285,22 +290,27 @@ export class AIService {
    * Save messages to memory
    */
   static async saveMessagesToMemory(agent: Agent, appId: string, messages: any[]): Promise<void> {
-    const memory = await agent.getMemory();
-    if (memory && messages.length > 0) {
-      await memory.saveMessages({
-        messages: messages.map(msg => ({
-          content: {
-            parts: msg.parts || [{ type: 'text', text: msg.content || '' }],
-            format: 3,
-          },
-          role: msg.role || 'assistant',
-          createdAt: new Date(),
-          id: msg.id || crypto.randomUUID(),
-          threadId: appId,
-          type: 'text',
-          resourceId: appId,
-        })),
-      });
+    try {
+      const memory = await agent.getMemory();
+      if (memory && messages.length > 0) {
+        await memory.saveMessages({
+          messages: messages.map(msg => ({
+            content: {
+              parts: msg.parts || [{ type: 'text', text: msg.content || '' }],
+              format: 3,
+            },
+            role: msg.role || 'assistant',
+            createdAt: new Date(),
+            id: msg.id || crypto.randomUUID(),
+            threadId: appId,
+            type: 'text',
+            resourceId: appId,
+          })),
+        });
+      }
+    } catch (memoryError) {
+      console.warn("Failed to save messages to memory:", memoryError);
+      // Continue without memory if database is not available
     }
   }
 

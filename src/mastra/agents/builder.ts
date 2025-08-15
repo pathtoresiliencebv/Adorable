@@ -14,7 +14,7 @@ import {
   performanceTracker
 } from "@/lib/ai-models";
 
-// Enhanced memory configuration for advanced AI models
+// Enhanced memory configuration with better connection handling
 export const memory = new Memory({
   options: {
     lastMessages: 1000,
@@ -25,12 +25,44 @@ export const memory = new Memory({
   },
   vector: new PgVector({
     connectionString: process.env.DATABASE_URL!,
+    // Add connection timeout and retry configuration
+    connection: {
+      connectionTimeoutMillis: 10000, // 10 seconds
+      idleTimeoutMillis: 30000, // 30 seconds
+      max: 20, // Maximum number of connections
+      min: 2, // Minimum number of connections
+    },
   }),
   storage: new PostgresStore({
     connectionString: process.env.DATABASE_URL!,
+    // Add connection timeout and retry configuration
+    connection: {
+      connectionTimeoutMillis: 10000, // 10 seconds
+      idleTimeoutMillis: 30000, // 30 seconds
+      max: 20, // Maximum number of connections
+      min: 2, // Minimum number of connections
+    },
   }),
   processors: [],
 });
+
+/**
+ * 🚀 Fallback memory configuration for when database is not available
+ */
+export const createFallbackMemory = () => {
+  console.warn("Using fallback memory configuration - database connection failed");
+  return new Memory({
+    options: {
+      lastMessages: 100, // Reduced for fallback
+      semanticRecall: false,
+      threads: {
+        generateTitle: false, // Disabled for fallback
+      },
+    },
+    // No vector or storage for fallback - in-memory only
+    processors: [],
+  });
+};
 
 /**
  * 🚀 Advanced Builder Agent with Intelligent Model Selection

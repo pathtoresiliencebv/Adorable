@@ -212,8 +212,8 @@ export async function setStream(
             }
           }
           
-          // Format as Server-Sent Events for the frontend
-          const eventData = `data: ${JSON.stringify({ content })}\n\n`;
+          // Format as Server-Sent Events for the frontend (Vercel AI SDK format)
+          const eventData = `data: ${JSON.stringify({ content, role: "assistant" })}\n\n`;
           controller.enqueue(new TextEncoder().encode(eventData));
           controller.close();
         }

@@ -88,7 +88,6 @@ export async function createApp({
   if (initialMessage) {
     console.time("send initial message");
 
-    // Send the initial message using the same infrastructure as the chat API
     await sendMessageWithStreaming(builderAgent, app.id, mcpEphemeralUrl, fs, {
       id: crypto.randomUUID(),
       parts: [

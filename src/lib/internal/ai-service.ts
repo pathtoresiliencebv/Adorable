@@ -3,15 +3,13 @@ import { MCPClient } from "@mastra/mcp";
 import { Agent } from "@mastra/core/agent";
 import { MessageList } from "@mastra/core/agent";
 import { FreestyleDevServerFilesystem } from "freestyle-sandboxes";
-import { AgentFactory, createFallbackMemory } from "@/mastra/agents/builder";
-import { performanceTracker } from "@/lib/ai-models";
+import { builderAgent } from "@/mastra/agents/builder";
+import { createMCPClient } from "@/lib/mcp-config";
 import { isMorphEnabled } from "@/lib/morph-config";
-import { CreditsService } from "@/lib/services/credits-service";
 
 export interface AIStreamOptions {
   threadId: string;
   resourceId: string;
-  taskType?: string; // New: specify task type for intelligent agent selection
   maxSteps?: number;
   maxRetries?: number;
   maxOutputTokens?: number;
@@ -20,9 +18,6 @@ export interface AIStreamOptions {
   onError?: (error: { error: unknown }) => void;
   onFinish?: () => void;
   abortSignal?: AbortSignal;
-  timeout?: number; // Add timeout option
-  userId?: string; // User ID for credits checking
-  appId?: string; // App ID for usage tracking
 }
 
 export interface AIResponse {
@@ -34,35 +29,6 @@ export interface AIResponse {
 }
 
 export class AIService {
-  /**
-   * Send a message to the AI and get a stream response
-   *
-   * This is the main method developers should use for AI interactions.
-   * It handles all the complex setup (MCP client, toolsets, memory, streaming)
-   * and returns a clean response object with just the stream.
-   *
-   * All message list management and MCP client lifecycle is handled internally.
-   *
-   * @param agent - The Mastra agent to use for AI interactions (optional - will auto-select if not provided)
-   * @param appId - The application ID
-   * @param mcpUrl - The MCP server URL
-   * @param message - The message to send to the AI
-   * @param options - Optional configuration for the AI interaction
-   * @returns Promise<AIResponse> - Contains only the stream for UI consumption
-   *
-   * @example
-   * ```typescript
-   * // Auto-select agent based on task
-   * const response = await AIService.sendMessage(null, appId, mcpUrl, fs, {
-   *   id: crypto.randomUUID(),
-   *   parts: [{ type: "text", text: "Debug this authentication issue" }],
-   *   role: "user"
-   * }, { taskType: "debugging" });
-   *
-   * // Use specific agent
-   * const response = await AIService.sendMessage(debuggingAgent, appId, mcpUrl, fs, message);
-   * ```
-   */
   static async sendMessage(
     agent: Agent | null,
     appId: string,
@@ -71,355 +37,61 @@ export class AIService {
     message: UIMessage,
     options?: Partial<AIStreamOptions>
   ): Promise<AIResponse> {
-    const startTime = Date.now();
-    const timeout = options?.timeout || 60000; // 60 seconds default timeout
-    
-    // Create a timeout controller
-    const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => {
-      timeoutController.abort();
-    }, timeout);
-    
-    // Combine abort signals
-    const combinedAbortController = new AbortController();
-    if (options?.abortSignal) {
-      options.abortSignal.addEventListener('abort', () => {
-        combinedAbortController.abort();
-      });
-    }
-    timeoutController.signal.addEventListener('abort', () => {
-      combinedAbortController.abort();
-    });
-    
-    try {
-      // Check credits if userId and appId are provided
-      if (options?.userId && options?.appId) {
-        const hasEnoughCredits = await CreditsService.hasEnoughCredits(options.userId, 1);
-        if (!hasEnoughCredits) {
-          throw new Error('Insufficient credits. Please upgrade your plan to continue.');
-        }
-      }
+    const mcpClient = createMCPClient(mcpUrl);
+    const toolsets = await mcpClient.getToolsets();
 
-      // Auto-select agent if not provided
-      if (!agent) {
-        const taskType = options?.taskType || this.detectTaskType(message);
-        agent = await AgentFactory.getAgentForTask(taskType);
-        console.log(`🤖 Auto-selected agent for task: ${taskType} -> ${agent.name}`);
-      }
-
-      // Create MCP client directly
-      const mcpClient = new MCPClient({
-        id: crypto.randomUUID(),
-        servers: {
-          dev_server: {
-            url: new URL(mcpUrl),
-          },
-        },
-      });
-
-      // Get toolsets from MCP client with timeout
-      const toolsetsPromise = mcpClient.getToolsets();
-      const baseToolsets = await Promise.race([
-        toolsetsPromise,
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('MCP toolsets timeout')), 10000)
-        )
-      ]) as any;
-
-      // Add Morph tools if available
-      let toolsets = { ...baseToolsets };
-      if (isMorphEnabled()) {
-        try {
-          const { morphTool, fastApplyTool, batchEditTool, morphMetricsTool } = await import('@/tools/morph-fast-apply');
-          
-          toolsets.morph = {
-            edit_file: morphTool(fs),
-            fast_edit_file: fastApplyTool(fs),
-            batch_edit_files: batchEditTool(fs),
-            get_morph_metrics: morphMetricsTool(),
-          };
-          
-          console.log('✅ Morph tools added to toolsets');
-        } catch (morphError) {
-          console.warn('⚠️ Failed to load Morph tools:', morphError);
-        }
-      } else {
-        console.log('ℹ️ Morph tools not available - API key not configured');
-      }
-
-      // Save message to memory with error handling
+    // Add Morph tools if available
+    if (isMorphEnabled()) {
       try {
-        const memory = await agent.getMemory();
-        if (memory) {
-          await memory.saveMessages({
-            messages: [
-              {
-                content: {
-                  parts: message.parts,
-                  format: 3,
-                },
-                role: "user",
-                createdAt: new Date(),
-                id: message.id,
-                threadId: appId,
-                type: "text",
-                resourceId: appId,
-              },
-            ],
-          });
-        }
-      } catch (memoryError) {
-        console.warn("Failed to save message to memory, continuing without memory:", memoryError);
-        // Continue without memory if database is not available
-      }
-
-      const messageList = new MessageList({
-        resourceId: appId,
-        threadId: appId,
-      });
-
-      const stream = await agent.stream([message], {
-        threadId: appId,
-        resourceId: appId,
-        maxSteps: options?.maxSteps ?? 100,
-        maxRetries: options?.maxRetries ?? 0,
-        maxOutputTokens: options?.maxOutputTokens ?? 64000,
-        toolsets,
-        async onChunk() {
-          options?.onChunk?.();
-        },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        async onStepFinish(step: { response: { messages: unknown[] } }) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          messageList.add(step.response.messages as any, "response");
-          options?.onStepFinish?.(step);
-        },
-        onError: async (error: { error: unknown }) => {
-          // Handle cleanup internally
-          await mcpClient.disconnect();
-          
-          // Record error metrics
-          const endTime = Date.now();
-          performanceTracker.recordMetrics(agent.model?.modelId || 'unknown', {
-            responseTime: endTime - startTime,
-            tokenUsage: 0,
-            successRate: 0,
-            cost: 0
-          });
-          
-          // Handle specific AI_APICallError for reasoning items
-          if (error.error && typeof error.error === 'object' && 'name' in error.error) {
-            const apiError = error.error as any;
-            if (apiError.name === 'AI_APICallError' && apiError.message?.includes('reasoning')) {
-              console.warn('Reasoning item error detected, attempting recovery...');
-              // Try to recover by using a simpler approach
-              try {
-                const fallbackStream = await agent.stream([message], {
-                  threadId: appId,
-                  resourceId: appId,
-                  maxSteps: options?.maxSteps ?? 50,
-                  maxRetries: 0,
-                  maxOutputTokens: options?.maxOutputTokens ?? 32000,
-                  toolsets,
-                  async onChunk() {
-                    options?.onChunk?.();
-                  },
-                  async onStepFinish(step: { response: { messages: unknown[] } }) {
-                    messageList.add(step.response.messages as any, "response");
-                    options?.onStepFinish?.(step);
-                  },
-                  onError: async (fallbackError: { error: unknown }) => {
-                    await mcpClient.disconnect();
-                    options?.onError?.(fallbackError);
-                  },
-                  onFinish: async () => {
-                    await mcpClient.disconnect();
-                    options?.onFinish?.();
-                  },
-                  abortSignal: combinedAbortController.signal,
-                });
-                
-                return {
-                  stream: {
-                    toUIMessageStreamResponse: () => ({
-                      body: fallbackStream,
-                    }),
-                  },
-                };
-              } catch (fallbackError) {
-                console.error('Fallback stream also failed:', fallbackError);
-              }
-            }
-          }
-          
-          options?.onError?.(error);
-        },
-        onFinish: async () => {
-          // Handle cleanup internally
-          await mcpClient.disconnect();
-          
-          // Deduct credits if userId and appId are provided
-          if (options?.userId && options?.appId) {
-            try {
-              const messageLength = message.parts
-                .filter(part => part.type === 'text')
-                .map(part => (part as any).text)
-                .join(' ')
-                .length;
-              
-              await CreditsService.deductCredits(
-                options.userId,
-                options.appId,
-                1,
-                messageLength,
-                { taskType: options.taskType }
-              );
-            } catch (error) {
-              console.error('Error deducting credits:', error);
-              // Don't fail the request if credits deduction fails
-            }
-          }
-          
-          // Record success metrics
-          const endTime = Date.now();
-          performanceTracker.recordMetrics(agent.model?.modelId || 'unknown', {
-            responseTime: endTime - startTime,
-            tokenUsage: 0,
-            successRate: 1,
-            cost: 0
-          });
-          
-          options?.onFinish?.();
-        },
-        abortSignal: combinedAbortController.signal,
-      });
-
-      // Clear timeout since we got a response
-      clearTimeout(timeoutId);
-
-      return {
-        stream: {
-          toUIMessageStreamResponse: () => ({
-            body: stream,
-          }),
-        },
-      };
-    } catch (error) {
-      // Clear timeout
-      clearTimeout(timeoutId);
-      
-      // Handle cleanup on error
-      console.error("AI Service error:", error);
-      
-      // Record error metrics
-      const endTime = Date.now();
-      performanceTracker.recordMetrics(agent?.model?.modelId || 'unknown', {
-        responseTime: endTime - startTime,
-        tokenUsage: 0,
-        successRate: 0,
-        cost: 0
-      });
-      
-      throw error;
-    }
-  }
-
-  /**
-   * Detect task type from message content
-   */
-  private static detectTaskType(message: UIMessage): string {
-    const text = message.parts
-      .filter(part => part.type === 'text')
-      .map(part => (part as any).text)
-      .join(' ')
-      .toLowerCase();
-
-    // Task detection logic
-    if (text.includes('debug') || text.includes('error') || text.includes('fix')) {
-      return 'debugging';
-    }
-    if (text.includes('ui') || text.includes('frontend') || text.includes('component')) {
-      return 'ui-ux';
-    }
-    if (text.includes('backend') || text.includes('api') || text.includes('database')) {
-      return 'backend';
-    }
-    if (text.includes('security') || text.includes('auth')) {
-      return 'security';
-    }
-    if (text.includes('performance') || text.includes('optimize')) {
-      return 'performance';
-    }
-    if (text.includes('test') || text.includes('qa')) {
-      return 'testing';
-    }
-    if (text.includes('document') || text.includes('tutorial')) {
-      return 'documentation';
-    }
-    if (text.includes('architecture') || text.includes('system design')) {
-      return 'architecture';
-    }
-
-    return 'code-generation';
-  }
-
-  /**
-   * Get unsaved messages from memory
-   */
-  static async getUnsavedMessages(appId: string): Promise<any[]> {
-    // This would typically retrieve messages that haven't been saved yet
-    // For now, return empty array
-    return [];
-  }
-
-  /**
-   * Save messages to memory
-   */
-  static async saveMessagesToMemory(agent: Agent, appId: string, messages: any[]): Promise<void> {
-    try {
-      const memory = await agent.getMemory();
-      if (memory && messages.length > 0) {
-        await memory.saveMessages({
-          messages: messages.map(msg => ({
-            content: {
-              parts: msg.parts || [{ type: 'text', text: msg.content || '' }],
-              format: 3,
-            },
-            role: msg.role || 'assistant',
-            createdAt: new Date(),
-            id: msg.id || crypto.randomUUID(),
-            threadId: appId,
-            type: 'text',
-            resourceId: appId,
-          })),
-        });
-      }
-    } catch (memoryError) {
-      console.warn("Failed to save messages to memory:", memoryError);
-      // Continue without memory if database is not available
-    }
-  }
-
-  /**
-   * Get agent statistics
-   */
-  static getAgentStats() {
-    return AgentFactory.getAgentStats();
-  }
-
-  /**
-   * Get performance metrics for all models
-   */
-  static getPerformanceMetrics() {
-    const stats = AgentFactory.getAgentStats();
-    const metrics: Record<string, any> = {};
-    
-    for (const [name, agentStats] of Object.entries(stats)) {
-      if (agentStats.metrics) {
-        metrics[name] = agentStats.metrics;
+        const { morphTool, fastApplyTool, batchEditTool, morphMetricsTool } = await import('@/tools/morph-fast-apply');
+        
+        toolsets.morph = {
+          edit_file: morphTool(fs),
+          fast_edit_file: fastApplyTool(fs),
+          batch_edit_files: batchEditTool(fs),
+          get_morph_metrics: morphMetricsTool(),
+        };
+      } catch (error) {
+        console.warn('Failed to load Morph tools:', error);
       }
     }
-    
-    return metrics;
+
+    const messageList = new MessageList({
+      resourceId: appId,
+      threadId: appId,
+    });
+
+    const stream = await (agent || builderAgent).stream([message], {
+      threadId: appId,
+      resourceId: appId,
+      maxSteps: options?.maxSteps ?? 100,
+      maxRetries: options?.maxRetries ?? 0,
+      maxOutputTokens: options?.maxOutputTokens ?? 64000,
+      toolsets,
+      async onChunk() {
+        options?.onChunk?.();
+      },
+      async onStepFinish(step: { response: { messages: unknown[] } }) {
+        messageList.add(step.response.messages as any, "response");
+        options?.onStepFinish?.(step);
+      },
+      onError: async (error: { error: unknown }) => {
+        await mcpClient.disconnect();
+        options?.onError?.(error);
+      },
+      onFinish: async () => {
+        await mcpClient.disconnect();
+        options?.onFinish?.();
+      },
+      abortSignal: options?.abortSignal,
+    });
+
+    return {
+      stream: {
+        toUIMessageStreamResponse: () => ({
+          body: stream,
+        }),
+      },
+    };
   }
 }

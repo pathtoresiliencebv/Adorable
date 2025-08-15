@@ -1,6 +1,6 @@
 "use client";
 
-import { useChat as useAIChat } from "ai/react";
+import { useChat as useAIChat } from "@ai-sdk/react";
 
 export function useChat(options: {
   api: string;

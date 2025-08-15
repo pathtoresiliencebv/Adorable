@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat } from "@/components/use-chat";
-import { ChatInput } from "@/components/chatinput";
+import { PromptInputBasic } from "@/components/chatinput";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Markdown } from "@/components/ui/markdown";
@@ -250,11 +250,11 @@ export function Chat({ appId }: ChatProps) {
       </div>
 
       <div className="p-4 border-t">
-        <ChatInput
+        <PromptInputBasic
           input={input}
-          handleInputChange={handleInputChange}
-          handleSubmit={handleSubmit}
-          isLoading={isLoading}
+          onValueChange={handleInputChange}
+          onSubmit={handleSubmit}
+          isGenerating={isLoading}
           stop={stop}
         />
       </div>

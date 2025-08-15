@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Qreatify",
+  title: "qreatify",
   description: " AI App Builder",
   manifest: "/manifest.json",
 };

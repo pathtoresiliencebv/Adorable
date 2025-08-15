@@ -166,9 +166,42 @@ export async function setStream(
     appId,
     () => {
       console.log("📤 [STREAM MANAGER] Creating readable stream from response body");
-      return responseBody.pipeThrough(
-        new TextDecoderStream()
-      ) as ReadableStream<string>;
+      console.log("🔍 [STREAM MANAGER] Response body type:", typeof responseBody);
+      console.log("🔍 [STREAM MANAGER] Response body constructor:", responseBody?.constructor?.name);
+      
+      // Check if responseBody is already a ReadableStream
+      if (responseBody instanceof ReadableStream) {
+        console.log("✅ [STREAM MANAGER] Response body is already a ReadableStream");
+        return responseBody.pipeThrough(
+          new TextDecoderStream()
+        ) as ReadableStream<string>;
+      }
+      
+      // If it's not a ReadableStream, try to convert it
+      console.log("🔄 [STREAM MANAGER] Converting response body to ReadableStream");
+      if (typeof responseBody === 'string') {
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(responseBody));
+            controller.close();
+          }
+        }).pipeThrough(new TextDecoderStream());
+      }
+      
+      // If it's an object with a readable property
+      if (responseBody && typeof responseBody === 'object' && responseBody.readable) {
+        console.log("✅ [STREAM MANAGER] Using responseBody.readable");
+        return responseBody.readable.pipeThrough(new TextDecoderStream());
+      }
+      
+      // Fallback: create a simple stream with the stringified response
+      console.log("⚠️ [STREAM MANAGER] Using fallback stream conversion");
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(JSON.stringify(responseBody)));
+          controller.close();
+        }
+      }).pipeThrough(new TextDecoderStream());
     }
   );
 

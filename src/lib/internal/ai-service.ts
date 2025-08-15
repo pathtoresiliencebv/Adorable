@@ -120,12 +120,38 @@ export class AIService {
       console.log("✅ [AI SERVICE] Agent stream completed successfully");
       console.log("📦 [AI SERVICE] Stream object:", typeof stream);
       console.log("🔍 [AI SERVICE] Stream has toUIMessageStreamResponse:", !!stream.toUIMessageStreamResponse);
+      console.log("🔍 [AI SERVICE] Stream constructor:", stream?.constructor?.name);
+      console.log("🔍 [AI SERVICE] Stream properties:", Object.keys(stream || {}));
 
+      // Ensure we return a proper stream format
       return {
         stream: {
-          toUIMessageStreamResponse: () => ({
-            body: stream,
-          }),
+          toUIMessageStreamResponse: () => {
+            console.log("🔄 [AI SERVICE] Creating toUIMessageStreamResponse");
+            console.log("📦 [AI SERVICE] Stream type:", typeof stream);
+            
+            // If stream is already a ReadableStream, use it directly
+            if (stream instanceof ReadableStream) {
+              console.log("✅ [AI SERVICE] Stream is already a ReadableStream");
+              return { body: stream };
+            }
+            
+            // If stream has a readable property, use that
+            if (stream && typeof stream === 'object' && stream.readable) {
+              console.log("✅ [AI SERVICE] Using stream.readable");
+              return { body: stream.readable };
+            }
+            
+            // If stream has a toReadableStream method, use that
+            if (stream && typeof stream.toReadableStream === 'function') {
+              console.log("✅ [AI SERVICE] Using stream.toReadableStream()");
+              return { body: stream.toReadableStream() };
+            }
+            
+            // Fallback: return the stream as is
+            console.log("⚠️ [AI SERVICE] Using stream as-is");
+            return { body: stream };
+          },
         },
       };
     } catch (error) {

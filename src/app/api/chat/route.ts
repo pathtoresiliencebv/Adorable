@@ -52,9 +52,8 @@ export async function POST(req: NextRequest) {
     repoId: app.info.gitRepo,
   });
 
-  // Use intelligent model selection (pass null to auto-select)
   const resumableStream = await sendMessageWithStreaming(
-    null, // Auto-select best model based on task
+    builderAgent,
     appId,
     mcpEphemeralUrl,
     fs,

@@ -3,13 +3,14 @@ import { MCPClient } from "@mastra/mcp";
 import { Agent } from "@mastra/core/agent";
 import { MessageList } from "@mastra/core/agent";
 import { FreestyleDevServerFilesystem } from "freestyle-sandboxes";
-import { builderAgent } from "@/mastra/agents/builder";
+import { builderAgent, getAgentForTask } from "@/mastra/agents/builder";
 import { createMCPClient } from "@/lib/mcp-config";
 import { isMorphEnabled } from "@/lib/morph-config";
 
 export interface AIStreamOptions {
   threadId: string;
   resourceId: string;
+  taskType?: string; // Add task type for model selection
   maxSteps?: number;
   maxRetries?: number;
   maxOutputTokens?: number;
@@ -56,12 +57,20 @@ export class AIService {
       }
     }
 
+    // Select the best agent based on task type
+    let selectedAgent = agent;
+    if (!selectedAgent) {
+      const taskType = options?.taskType || this.detectTaskType(message);
+      selectedAgent = getAgentForTask(taskType);
+      console.log(`🤖 Selected model for task: ${taskType} -> ${selectedAgent.model?.modelId}`);
+    }
+
     const messageList = new MessageList({
       resourceId: appId,
       threadId: appId,
     });
 
-    const stream = await (agent || builderAgent).stream([message], {
+    const stream = await selectedAgent.stream([message], {
       threadId: appId,
       resourceId: appId,
       maxSteps: options?.maxSteps ?? 100,
@@ -93,5 +102,33 @@ export class AIService {
         }),
       },
     };
+  }
+
+  // Detect task type from message content
+  private static detectTaskType(message: UIMessage): string {
+    const text = message.parts
+      .filter(part => part.type === 'text')
+      .map(part => (part as any).text)
+      .join(' ')
+      .toLowerCase();
+
+    // Task detection logic
+    if (text.includes('debug') || text.includes('error') || text.includes('fix')) {
+      return 'debugging';
+    }
+    if (text.includes('architecture') || text.includes('system design')) {
+      return 'architecture';
+    }
+    if (text.includes('security') || text.includes('auth')) {
+      return 'security';
+    }
+    if (text.includes('performance') || text.includes('optimize')) {
+      return 'performance';
+    }
+    if (text.includes('complex') || text.includes('advanced')) {
+      return 'complex';
+    }
+
+    return 'code-generation';
   }
 }

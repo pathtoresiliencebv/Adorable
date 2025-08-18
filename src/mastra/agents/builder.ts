@@ -24,7 +24,9 @@ export const memory = new Memory({
 
 export const builderAgent = new Agent({
   name: "BuilderAgent",
-  model: anthropic("claude-3-7-sonnet-20250219"),
+  model: anthropic("claude-3-5-sonnet-20241022", {
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  }),
   instructions: SYSTEM_MESSAGE,
   memory,
   tools: {
